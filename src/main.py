@@ -17,3 +17,5 @@ def main():
   sensor = DistanceSensor(trigger=23, echo=24, threshold_distance=THRESHOLD_DISTANCE)
   sensor.when_activated = lambda: print(f"Activated; Distance: {sensor.distance * 100} cm")
   sensor.when_deactivated = lambda: print(f"Deactivated; Distance: {sensor.distance * 100} cm")
+
+main()
