@@ -1,6 +1,6 @@
 # Import dependencies
 from gpiozero import DistanceSensor
-from picamera import PiCamera
+from picamera2 import Picamera2
 from time import sleep
 
 # 
@@ -23,7 +23,7 @@ def initSensors():
   sensor = DistanceSensor(trigger=23, echo=24, threshold_distance=THRESHOLD_DISTANCE / 100)
 
   # Initialise the camera
-  camera = PiCamera()
+  camera = Picamera2()
   
   # Sleep for 2 seconds to allow the camera to warm up
   sleep(2)
