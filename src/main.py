@@ -24,6 +24,7 @@ def initSensors():
 
   # Initialise the camera
   camera = Picamera2()
+  camera.start()
   
   # Sleep for 2 seconds to allow the camera to warm up
   sleep(2)
@@ -33,7 +34,7 @@ def initSensors():
 def captureImage():
   print("Capturing image")
   # Capture an image
-  camera.capture('./images/test.jpg')
+  camera.capture_file('./images/test.jpg')
   print("Image captured")
 
 ## Main
