@@ -1,6 +1,7 @@
 # Import dependencies
 from gpiozero import DistanceSensor
 from picamera2 import Picamera2
+from libcamera import controls
 from time import sleep
 
 # 
@@ -24,7 +25,10 @@ def initSensors():
 
   # Initialise the camera
   camera = Picamera2()
+  config = camera.create_still_configuration()
+  camera.configure(config)
   camera.start()
+  camera.set_controls({"AfMode": controls.AfModeEnum.Continuous})
   
   # Sleep for 2 seconds to allow the camera to warm up
   sleep(2)
@@ -50,6 +54,6 @@ def main():
 
     print(f"Distance: {sensor.distance * 100} cm")
     # Sleep for 10ms
-    sleep(0.01)
+    sleep(1)
 
 main()
