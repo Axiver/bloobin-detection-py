@@ -29,6 +29,13 @@ def initSensors():
   sleep(2)
   print("Sensors initialised")
 
+## Capture image
+def captureImage():
+  print("Capturing image")
+  # Capture an image
+  camera.capture('./images/test.jpg')
+  print("Image captured")
+
 ## Main
 def main():
   # Initialise sensors
@@ -38,7 +45,7 @@ def main():
     # Check if the distance is within the threshold distance
     if (sensor.distance < THRESHOLD_DISTANCE / 100):
       print("Within threshold distance")
-      camera.capture('./images/test.jpg')
+      captureImage()
 
     print(f"Distance: {sensor.distance * 100} cm")
     # Sleep for 10ms
