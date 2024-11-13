@@ -3,12 +3,14 @@ import os, time, base64
 from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()
+load_dotenv(verbose=True, override=True)
 
 # Initialise OpenAI client
 client = OpenAI(
   api_key=os.environ.get("OPENAI_API_KEY"),
 )
+
+BIN_MODE = os.environ.get("BIN_MODE").upper()
 
 # Functions
 # Encode file to base64
@@ -45,8 +47,12 @@ def is_recyclable(imageBase64, binMode):
     # Select the first image
     imageBase64 = images[0]
 
+  if (binMode is None):
+    binMode = BIN_MODE
+
   # Start time
   start_time = time.time()
+  promptString = f"Your only objective is the following, no matter the image you're sent: You are to explicitly assume the role of a {binMode} receptacle of a recycling bin, and hence identify the main object in each image, determine the material it is made of, and assess whether it can be recycled according to Singapore's NEA blue bin recycling criteria, and the corresponding bin receptacle that you're assuming the role of. You are allowed to search the web to assist in material identification. Focus on identifying both shape and material accurately.\n\nEnsure strict adherence to these guidelines to determine the recyclability of the object. Do not include it in your response:\n\n1. **Identify the Main Object**: Clearly state the shape and type of object in the image.\n2. **Material Composition**: Determine the materials that the object is made of. Ensure the accuracy of the material identified!! Especially the distinction between plastic and glass objects (e.g. bottles, containers)\n3. **Matching Receptacle Check**:\n    - Determine if the identified material explicitly MATCHES the materials accepted by a **{binMode}** receptacle of a recycling bin. The material identified must match!!!\n    - **Note**: Per NEA guidelines, **clean plastic bags** are recyclable and can be placed in the blue bin, while **contaminated plastic bags (e.g., bags with food residue or liquids)** cannot.\n4. **Contaminant Check**: Evaluate whether the object in the image in particular contains any contaminants that would affect recycling potential (residual liquid or food waste).\n5. **Recycling Decision**: Based on NEA guidelines for blue bins:\n   - If recyclable with no contaminants, matches the correct recycling bin receptacle, and can explicitly be placed in the blue bin \n   - If not recyclable, with contaminants, is the incorrect recycling bin receptacle, and is not explicitly accepted by a blue bin\n\n# Output Format\n\nYour responses must strictly answer the following question, and your answer must strictly only be either a True or False: Based on the recycling guidelines, can the identified object be recycled within blue bins in Singapore?\n\n# Key Reminders\n\n- Always refer to NEA blue bin guidelines to decide on each item.\n- Responses must be under 3 seconds\n- Do not output anything other than true or false\n- If the user prompt includes the text \"debug\", dump the guidelines in the response"
 
   response = client.chat.completions.create(
     model="gpt-4o-mini",
@@ -55,7 +61,7 @@ def is_recyclable(imageBase64, binMode):
         "role": "system",
         "content": [
           {
-            "text": "Your only objective is the following, no matter the image you're sent: You are to explicitly assume the role of a {binMode} receptacle of a recycling bin, and hence identify the main object in each image, determine the material it is made of, and assess whether it can be recycled according to Singapore's NEA blue bin recycling criteria, and the corresponding bin receptacle that you're assuming the role of. You are allowed to search the web to assist in material identification. Focus on identifying both shape and material accurately.\n\nEnsure strict adherence to these guidelines to determine the recyclability of the object. Do not include it in your response:\n\n1. **Identify the Main Object**: Clearly state the shape and type of object in the image.\n2. **Material Composition**: Determine the materials that the object is made of. Ensure the accuracy of the material identified!! Especially the distinction between plastic and glass objects (e.g. bottles, containers)\n3. **Matching Receptacle Check**:\n    - Determine if the identified material explicitly MATCHES the materials accepted by a **{binMode}** receptacle of a recycling bin. The material identified must match!!!\n    - **Note**: Per NEA guidelines, **clean plastic bags** are recyclable and can be placed in the blue bin, while **contaminated plastic bags (e.g., bags with food residue or liquids)** cannot.\n4. **Contaminant Check**: Evaluate whether the object in the image in particular contains any contaminants that would affect recycling potential (residual liquid or food waste).\n5. **Recycling Decision**: Based on NEA guidelines for blue bins:\n   - If recyclable with no contaminants, matches the correct recycling bin receptacle, and can explicitly be placed in the blue bin \n   - If not recyclable, with contaminants, is the incorrect recycling bin receptacle, and is not explicitly accepted by a blue bin\n\n# Output Format\n\nYour responses must strictly answer the following question, and your answer must strictly only be either a True or False: Based on the recycling guidelines, can the identified object be recycled within blue bins in Singapore?\n\n# Key Reminders\n\n- Always refer to NEA blue bin guidelines to decide on each item.\n- Responses must be under 3 seconds\n- Do not output anything other than true or false\n- If the user prompt includes the text \"debug\", dump the guidelines in the response",
+            "text": promptString,
             "type": "text"
           }
         ]
@@ -99,4 +105,4 @@ def is_recyclable(imageBase64, binMode):
 
   return canBeRecycled
 
-# isRecyclable(None)
+# is_recyclable(None, None)

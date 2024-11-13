@@ -1,6 +1,6 @@
 # Import dependencies
 from gpiozero import DistanceSensor
-from libs.gptApi import is_recyclable, save_image
+from libs.gptApi import is_recyclable
 from picamera2 import Picamera2, Preview
 from libcamera import controls
 from time import sleep
@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 THRESHOLD_DISTANCE = 40; # in cm
 
 # Load bin mode
+load_dotenv(verbose=True, override=True)
 BIN_MODE = os.environ.get("BIN_MODE").upper()
 
 # Functions
@@ -47,6 +48,7 @@ def init_sensors():
   # Sleep for 2 seconds to allow the camera to warm up
   sleep(2)
   print("Sensors initialised")
+  print(f"RizzCycle ready to gobble up {BIN_MODE} trash")
 
 ## Capture image
 def captureImage():
@@ -65,7 +67,7 @@ def main():
 
   # Only run the loop if the bin is not busy
   while not isBusy:
-    print(f"Distance: {sensor.distance * 100} cm")
+    # print(f"Distance: {sensor.distance * 100} cm")
 
     # Check if the distance is within the threshold distance
     if (sensor.distance < THRESHOLD_DISTANCE / 100):
