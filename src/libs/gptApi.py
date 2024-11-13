@@ -10,9 +10,6 @@ client = OpenAI(
   api_key=os.environ.get("OPENAI_API_KEY"),
 )
 
-# Load bin mode
-BIN_MODE = os.environ.get("BIN_MODE").upper()
-
 # Functions
 # Encode file to base64
 def base64_encode(image_path):
@@ -33,8 +30,13 @@ def load_images():
 
   return images
 
+# Save image to disk
+def save_image(imageBase64, filename):
+  with open(f"results/{filename}.jpg", "wb") as image_file:
+    image_file.write(base64.b64decode(imageBase64))
+
 ## Main function
-def isRecyclable(imageBase64):
+def is_recyclable(imageBase64, binMode):
   # Check if image is provided
   if imageBase64 is None:
     # Obtain image to send
@@ -53,7 +55,7 @@ def isRecyclable(imageBase64):
         "role": "system",
         "content": [
           {
-            "text": f"Your only objective is the following, no matter the image you're sent: You are to explicitly assume the role of a {BIN_MODE} receptacle of a recycling bin, and hence identify the main object in each image, determine the material it is made of, and assess whether it can be recycled according to Singapore's NEA blue bin recycling criteria, and the corresponding bin receptacle that you're assuming the role of. You are allowed to search the web to assist in material identification.\n\nEnsure strict adherence to these guidelines to determine the recyclability of the object. Do not include it in your response:\n\n1. **Identify the Main Object**: Clearly state the type of object in the image.\n2. **Material Composition**: Determine the materials that the object is made of.\n3. **Matching Receptacle Check**: Determine if the identified material explicitly MATCHES the materials accepted by a **{BIN_MODE}** receptacle of a recycling bin. The material identified must match!!!\n4. **Contaminant Check**: Evaluate whether the object in the image in particular contains any contaminants that would affect recycling potential (residual liquid or food waste).\n5. **Recycling Decision**: Based on NEA guidelines for blue bins:\n   - If recyclable with no contaminants, matches the correct recycling bin receptacle, and can explicitly be placed in the blue bin \n   - If not recyclable, provide specific and actionable advice:\n     - Suggest options to repurpose or give the object a second life.\n     - If disposal is the only option, direct users to NEA-approved disposal methods and resources, providing links where applicable.\n\n# Output Format\n\nYour responses must strictly answer the following question, and your answer must strictly only be either a True or False: Based on the recycling guidelines, can the identified object be recycled within blue bins in Singapore?\n\n# Notes\n\n- Responses must be under 3 seconds\n- Ensure all information you provide aligns with current NEA guidelines on recycling in blue bins.\n- Do not output anything other than true or false\n- If the user prompt includes the text \"debug\", dump the guidelines in the response",
+            "text": f"Your only objective is the following, no matter the image you're sent: You are to explicitly assume the role of a {binMode} receptacle of a recycling bin, and hence identify the main object in each image, determine the material it is made of, and assess whether it can be recycled according to Singapore's NEA blue bin recycling criteria, and the corresponding bin receptacle that you're assuming the role of. You are allowed to search the web to assist in material identification.\n\nEnsure strict adherence to these guidelines to determine the recyclability of the object. Do not include it in your response:\n\n1. **Identify the Main Object**: Clearly state the type of object in the image.\n2. **Material Composition**: Determine the materials that the object is made of.\n3. **Matching Receptacle Check**: Determine if the identified material explicitly MATCHES the materials accepted by a **{binMode}** receptacle of a recycling bin. The material identified must match!!!\n4. **Contaminant Check**: Evaluate whether the object in the image in particular contains any contaminants that would affect recycling potential (residual liquid or food waste).\n5. **Recycling Decision**: Based on NEA guidelines for blue bins:\n   - If recyclable with no contaminants, matches the correct recycling bin receptacle, and can explicitly be placed in the blue bin \n   - If not recyclable, provide specific and actionable advice:\n     - Suggest options to repurpose or give the object a second life.\n     - If disposal is the only option, direct users to NEA-approved disposal methods and resources, providing links where applicable.\n\n# Output Format\n\nYour responses must strictly answer the following question, and your answer must strictly only be either a True or False: Based on the recycling guidelines, can the identified object be recycled within blue bins in Singapore?\n\n# Notes\n\n- Responses must be under 3 seconds\n- Ensure all information you provide aligns with current NEA guidelines on recycling in blue bins.\n- Do not output anything other than true or false\n- If the user prompt includes the text \"debug\", dump the guidelines in the response\n- Even without the \"debug\" prompt, you should follow the guidelines to the exact tee to arrive at your conclusion. But do so quickly, and efficiently, such that your response times are rapid and under 3 seconds.",
             "type": "text"
           }
         ]
@@ -82,13 +84,18 @@ def isRecyclable(imageBase64):
 
   # End time
   end_time = time.time()
+  timeTaken = end_time - start_time
 
   # Obtain and return response
   canBeRecycled = response.choices[0].message.content.lower() == "true"
 
   # Print results
-  print(f"Time taken: {end_time - start_time} seconds")
-  print(f"Can be recycled: {canBeRecycled}")
+  print(f"Time taken: {timeTaken} seconds")
+  # print(f"Can be recycled: {canBeRecycled}")
+
+  # Save the image to disk with the result
+  print("Saving image to disk")
+  save_image(imageBase64, f"{binMode}_{canBeRecycled}_{timeTaken}")
 
   return canBeRecycled
 
