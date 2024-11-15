@@ -8,9 +8,12 @@ import asyncio, random
 # Motor - IN1: 22, IN2: 27
 # 
 
+# Constants
+MAX_DISTANCE = 0.5 # Maximum distance the motor can travel (in seconds)
+
 # Global variables
 distance_travelled = 0 # Distance travelled by the motor from the close position (in seconds)
-start_time = 0 # Start time of the motor (in seconds) (used to calculate distance travelled)
+start_time = None # Start time of the motor (in seconds) (used to calculate distance travelled)
 direction = "" # Direction of the motor (forward or backward) (used to calculate distance travelled)
 currentProcess = None
 
@@ -22,8 +25,10 @@ motor = Motor(22, 27)
 def update_distance():
   global distance_travelled, start_time, direction
 
+  print(f"Updating distance travelled: {distance_travelled}, start time: {start_time}, direction: {direction}")
+
   # Check if the motor was moving
-  if start_time == 0 or direction == "":
+  if start_time == None or direction == "":
     return # Motor was not moving
 
   # Calculate the time taken to move the motor
@@ -31,31 +36,34 @@ def update_distance():
   time_taken = end_time - start_time
 
   # Calculate the distance travelled by the motor
-  if direction == "forward":
-    distance_travelled += time_taken
-  elif direction == "backward":
-    distance_travelled -= time_taken
+  if direction == "open":
+    distance_travelled = min(MAX_DISTANCE, distance_travelled + time_taken) # Limit the distance to the maximum distance
+    print(f"Open calculation: {distance_travelled + time_taken}")
+  elif direction == "close":
+    distance_travelled = max(0, distance_travelled - time_taken) # Limit the distance to 0
+    print(f"Close calculation: {distance_travelled - time_taken}")
+
+  print(f"Distance travelled: {distance_travelled}")
 
   # Reset the start time and direction
-  start_time = 0
+  start_time = None
   direction = ""
 
 # Move the motor
 def move_motor(_direction, duration):
   global start_time, direction
 
-  # Update the distance travelled by the motor
-  update_distance()
+  print(f"Moving motor {_direction} for {duration} seconds")
 
   # Move the motor
-  if direction == "forward":
-    motor.forward()
-  elif direction == "backward":
+  if _direction == "open":
     motor.backward()
+  elif _direction == "close":
+    motor.forward()
 
   # Set the start time and direction
   start_time = time()
-  direction = direction
+  direction = _direction
 
   # Wait for the motor to move
   sleep(duration)
@@ -63,24 +71,53 @@ def move_motor(_direction, duration):
   # Stop the motor
   motor.stop()
 
+# Clear any previous movement
+def clearPreviousMovement():
+  print("Clearing previous movement")
+
+  # Stops the motor
+  motor.stop()
+
+  # Update the distance travelled
+  update_distance()
+
 # Open the receptacle
 def open_receptacle():
   # Stop any existing motor movement
-  motor.stop()
+  clearPreviousMovement()
 
-  # Update the distance travelled by the motor
-  # update_distance()
+  global distance_travelled
 
-  motor.backward()
-  sleep(0.5)
-  motor.stop()
+  print(f"Opening receptacle, distance travelled: {distance_travelled}")
+
+  # Check if the motor has already travelled the maximum distance
+  if distance_travelled >= MAX_DISTANCE:
+    return
+  
+  # Determine the amount of distance to travel
+  distance_to_travel = MAX_DISTANCE - distance_travelled
+
+  # Open the receptacle
+  move_motor("open", distance_to_travel)
 
 # Close the receptacle
 def close_receptacle():
-  motor.stop()
-  motor.forward()
-  sleep(0.45)
-  motor.stop()
+  # Stop any existing motor movement
+  clearPreviousMovement()
+
+  global distance_travelled
+
+  print(f"Closing receptacle, distance travelled: {distance_travelled}")
+
+  # Check if the motor has already reached the closed position
+  if distance_travelled <= 0:
+    return
+  
+  # Determine the amount of distance to travel
+  distance_to_travel = distance_travelled
+
+  # Close the receptacle
+  move_motor("close", distance_to_travel)
 
 # Toggle the receptacle
 async def toggle_receptacle():
