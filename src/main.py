@@ -1,6 +1,7 @@
 # Import dependencies
 from gpiozero import DistanceSensor
 from libs.gptApi import is_recyclable
+from libs.receptacle import open_receptacle, close_receptacle
 from picamera2 import Picamera2, Preview
 from libcamera import controls
 from time import sleep
@@ -11,6 +12,7 @@ from dotenv import load_dotenv
 # 
 # GPIO Mappings
 # Ultrasonic Sensor - Trigger: 23, Echo: 24
+# Motor - IN1: 22, IN2: 27
 # 
 
 # Constants
@@ -19,6 +21,9 @@ THRESHOLD_DISTANCE = 40; # in cm
 # Load bin mode
 load_dotenv(verbose=True, override=True)
 BIN_MODE = os.environ.get("BIN_MODE").upper()
+
+# Set log levels
+os.environ["LIBCAMERA_LOG_LEVELS"] = "3" # Configure libcamera to only log errors
 
 # Functions
 # Encode file to base64
@@ -38,8 +43,6 @@ def init_sensors():
   # Initialise the camera
   camera = Picamera2()
   config = camera.create_still_configuration(main={"size": (4608, 2592)}, display="main")
-
-  print(config)
   camera.configure(config)
   camera.start_preview(Preview.QT)
   camera.start()
@@ -87,7 +90,21 @@ def main():
       # Reset the flag
       isBusy = False
 
-    # Sleep for 10ms
-    sleep(1)
+      # Check if the item can be recycled
+      if canBeRecycled:
+        # Open the receptacle
+        open_receptacle()
+        sleep(3)
+
+        # Close the receptacle
+        close_receptacle()
+
+      # else:
+        # Close the receptacle
+        # close_receptacle()
+
+    else:
+      # Sleep for 1s
+      sleep(1)
 
 main()
