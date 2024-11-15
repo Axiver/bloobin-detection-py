@@ -1,12 +1,12 @@
 # Import dependencies
 from gpiozero import DistanceSensor
 from libs.gptApi import is_recyclable
-from libs.receptacle import open_receptacle, close_receptacle
+from libs.receptacle import toggle_receptacle
 from picamera2 import Picamera2, Preview
 from libcamera import controls
 from time import sleep
 from io import BytesIO
-import os, base64
+import os, base64, asyncio
 from dotenv import load_dotenv
 
 # 
@@ -35,7 +35,7 @@ def init_sensors():
   global sensor, camera
 
   # Initialise sensors
-  print("Initialising sensors")
+  print("Initialising sensors...")
 
   # Create a new ultrasonic sensor
   sensor = DistanceSensor(trigger=23, echo=24, threshold_distance=THRESHOLD_DISTANCE / 100)
@@ -55,56 +55,59 @@ def init_sensors():
 
 ## Capture image
 def captureImage():
-  print("Capturing image")
+  print("Capturing image...")
   # Initialise a image data buffer and capture an image
   data = BytesIO()
   camera.capture_file(data, format='jpeg')
   print("Image captured")
   return data
 
+## Process the detected object
+async def processObject():
+  global isBusy
+
+  try:
+    # Capture and send the image
+    image = captureImage()
+
+    # Encode the image to base64
+    imageBase64 = base64_encode(image.getvalue())
+
+    print("Sending image to GPT API...")
+    canBeRecycled = is_recyclable(imageBase64, BIN_MODE)
+
+    print(f"Can be recycled: {canBeRecycled}")
+
+    # Act based on recyclability
+    if canBeRecycled:
+      asyncio.create_task(toggle_receptacle())
+
+  finally:
+    isBusy = False # Allow detection to process new objects
+
+## Checks for object in front of the sensor
+async def checkObject():
+  global isBusy
+  isBusy = False
+
+  while True:
+    if sensor.distance < THRESHOLD_DISTANCE / 100:
+      print("Object detected within threshold distance")
+
+      if not isBusy:
+          isBusy = True # Prevent multiple simultaneous processing
+          asyncio.create_task(processObject())
+    # else:
+      # print("No object detected. Sleeping...")
+    
+    await asyncio.sleep(1)
+
 ## Main
-def main():
+async def main():
   # Initialise sensors
   init_sensors()
-  isBusy = False # Flag to indicate if the bin is busy
 
-  # Only run the loop if the bin is not busy
-  while not isBusy:
-    # print(f"Distance: {sensor.distance * 100} cm")
+  # Check if there is an object in front of the sensor
+  await checkObject()
 
-    # Check if the distance is within the threshold distance
-    if (sensor.distance < THRESHOLD_DISTANCE / 100):
-      print("Within threshold distance")
-      isBusy = True # Set the bin to busy
-      imageData = captureImage()
-
-      # Convert the image data to a base64 string
-      print("Converting image to base64")
-      imageBase64 = base64_encode(imageData.getvalue())
-
-      # Send the image to the GPT API
-      print("Sending image to GPT API")
-      canBeRecycled = is_recyclable(imageBase64, BIN_MODE)
-      print(f"Can be recycled: {canBeRecycled}")
-
-      # Reset the flag
-      isBusy = False
-
-      # Check if the item can be recycled
-      if canBeRecycled:
-        # Open the receptacle
-        open_receptacle()
-        sleep(3)
-
-        # Close the receptacle
-        close_receptacle()
-
-      # else:
-        # Close the receptacle
-        # close_receptacle()
-
-    else:
-      # Sleep for 1s
-      sleep(1)
-
-main()
+asyncio.run(main())

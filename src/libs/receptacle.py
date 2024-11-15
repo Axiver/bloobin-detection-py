@@ -1,5 +1,6 @@
 from gpiozero import Motor
 from time import sleep, time
+import asyncio, random
 
 # 
 # GPIO Mappings
@@ -11,6 +12,7 @@ from time import sleep, time
 distance_travelled = 0 # Distance travelled by the motor from the close position (in seconds)
 start_time = 0 # Start time of the motor (in seconds) (used to calculate distance travelled)
 direction = "" # Direction of the motor (forward or backward) (used to calculate distance travelled)
+currentProcess = None
 
 # Initialise the motor
 motor = Motor(22, 27)
@@ -79,6 +81,29 @@ def close_receptacle():
   motor.forward()
   sleep(0.45)
   motor.stop()
+
+# Toggle the receptacle
+async def toggle_receptacle():
+  # Generate a random number
+  random_number = random.randint(0, 9999)
+
+  # Set the current process
+  global currentProcess
+  currentProcess = random_number
+
+  # Open the receptacle
+  print(f"[{random_number}] Opening receptacle")
+  open_receptacle()
+  await asyncio.sleep(3)
+
+  # Check if this is still the current process
+  if currentProcess != random_number:
+    return
+
+  # It is still the current process
+  # Close the receptacle
+  print(f"[{random_number}] Closing receptacle")
+  close_receptacle()
 
 # Initialises the motor by travelling to the closed position
 def init_motor():
