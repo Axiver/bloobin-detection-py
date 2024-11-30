@@ -4,7 +4,7 @@ from picamera2 import Picamera2, Preview
 from libcamera import controls
 from time import sleep
 from io import BytesIO
-import os, time, asyncio
+import os, time, base64, asyncio
 
 # 
 # GPIO Mappings
@@ -16,10 +16,14 @@ import os, time, asyncio
 os.environ["LIBCAMERA_LOG_LEVELS"] = "3" # Configure libcamera to only log errors
 
 # Functions
+# Encode file to base64
+def base64_encode(image):
+  return base64.b64encode(image).decode("utf-8")
+
 # Save image to disk
-def save_image(imageJpeg, filename):
+def save_image(imageBase64, filename):
   with open(f"photobooth/{filename}.jpg", "wb") as image_file:
-    image_file.write(imageJpeg)
+    image_file.write(base64.b64decode(imageBase64))
 
 ## Initialise sensors
 def init_sensors():
@@ -51,17 +55,20 @@ def captureImage():
   return data
 
 ## Start a photobooth cycle
-def photoBoothStart():
+async def photoBoothStart():
   # Toggle the receptacle to open and close twice (4 movements in total)
-  countdown_receptacle(4, "Papparazzi 📸📸📸 INCOMING")
+  await countdown_receptacle(4, "Papparazzi 📸📸📸 INCOMING")
 
   # Capture and send the image
-  imageJpeg = captureImage()
+  image = captureImage()
+
+  # Encode the image to base64
+  imageBase64 = base64_encode(image.getvalue())
 
   # Save the image to disk with the result
   print("Saving image to disk")
   currentTime = time.time()
-  save_image(imageJpeg, f"{currentTime}")
+  save_image(imageBase64, f"{currentTime}")
 
 
 ## Main
@@ -71,7 +78,7 @@ async def main():
 
   # Start the photobooth cycle on a loop
   while True:
-    photoBoothStart()
+    await photoBoothStart()
     await asyncio.sleep(2)
 
 asyncio.run(main())
