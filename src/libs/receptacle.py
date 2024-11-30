@@ -119,6 +119,36 @@ def close_receptacle():
   # Close the receptacle
   move_motor("close", distance_to_travel)
 
+# Use the receptacle as a countdown
+async def countdown_receptacle(seconds, action):
+  # Generate a random number
+  random_number = random.randint(0, 9999)
+
+  # Set the current process
+  global currentProcess
+  currentProcess = random_number
+
+  # Perform the specified number of times
+  for i in range(seconds):
+    # Check if this is still the current process
+    if currentProcess != random_number:
+      print(f"[{random_number}] Process interrupted")
+      return
+    
+    # It is still the current process
+    # Open the receptacle if the index is odd
+    if (i % 2 != 0):
+      # Open the receptacle
+      print(f"[{random_number}] {action} in {seconds - i} (Opening)")
+      open_receptacle()
+      await asyncio.sleep(1)
+
+    if (i % 2 == 0):
+      # Close the receptacle
+      print(f"[{random_number}] {action} in {seconds - i} (Closing)")
+      close_receptacle()
+      await asyncio.sleep(1)
+
 # Toggle the receptacle
 async def toggle_receptacle():
   # Generate a random number
@@ -135,6 +165,7 @@ async def toggle_receptacle():
 
   # Check if this is still the current process
   if currentProcess != random_number:
+    print(f"[{random_number}] Process interrupted")
     return
 
   # It is still the current process
