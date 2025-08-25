@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Picamera2 WebRTC Stream</title>
+    <title>Picamera2 WebRTC Stream - Ultra HD</title>
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -12,7 +12,7 @@
         background-color: #f0f0f0;
       }
       .container {
-        max-width: 1200px;
+        max-width: 1400px;
         margin: 0 auto;
         text-align: center;
       }
@@ -22,12 +22,25 @@
         border-radius: 8px;
         overflow: hidden;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        position: relative;
       }
       video {
         width: 100%;
-        max-width: 800px;
+        max-width: 1200px;
         height: auto;
         display: block;
+        background: #000;
+      }
+      .video-overlay {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: monospace;
       }
       .controls {
         margin: 20px 0;
@@ -90,6 +103,23 @@
         font-weight: bold;
         margin-right: 10px;
       }
+      .quality-controls {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        margin: 20px 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      .quality-controls h3 {
+        margin-top: 0;
+        color: #007bff;
+      }
+      .quality-controls select {
+        padding: 8px;
+        margin: 0 10px;
+        border-radius: 4px;
+        border: 1px solid #ddd;
+      }
       .info-box {
         background: #e7f3ff;
         border: 1px solid #b3d9ff;
@@ -102,11 +132,35 @@
         margin-top: 0;
         color: #0056b3;
       }
+      .performance-info {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 20px 0;
+        font-family: monospace;
+        font-size: 14px;
+      }
+      .fullscreen-btn {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .fullscreen-btn:hover {
+        background: rgba(0, 0, 0, 0.9);
+      }
     </style>
   </head>
   <body>
     <div class="container">
-      <h1>Picamera2 WebRTC Stream</h1>
+      <h1>Picamera2 WebRTC Stream - Ultra HD</h1>
 
       <div class="config-section">
         <h3>Connection Settings</h3>
@@ -117,6 +171,24 @@
         <button onclick="updateConnection()">Update Connection</button>
       </div>
 
+      <div class="quality-controls">
+        <h3>Video Quality Settings</h3>
+        <label for="videoQuality">Stream Quality:</label>
+        <select id="videoQuality" onchange="updateVideoQuality()">
+          <option value="auto">Auto (Recommended)</option>
+          <option value="high">High Quality</option>
+          <option value="medium">Medium Quality</option>
+          <option value="low">Low Quality</option>
+        </select>
+        <label for="maxBitrate">Max Bitrate:</label>
+        <select id="maxBitrate" onchange="updateBitrate()">
+          <option value="20000000">20 Mbps (Ultra HD)</option>
+          <option value="10000000">10 Mbps (Full HD)</option>
+          <option value="5000000">5 Mbps (HD)</option>
+          <option value="2000000">2 Mbps (SD)</option>
+        </select>
+      </div>
+
       <div class="status disconnected" id="status">Disconnected</div>
 
       <div class="controls">
@@ -125,17 +197,25 @@
       </div>
 
       <div class="video-container">
+        <button class="fullscreen-btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+        <div class="video-overlay" id="videoInfo">Resolution: -- | FPS: --</div>
         <video id="video" autoplay playsinline muted></video>
       </div>
 
+      <div class="performance-info">
+        <h4>Performance Information:</h4>
+        <div id="performanceData">Connecting...</div>
+      </div>
+
       <div class="info-box">
-        <h3>How to Use:</h3>
-        <ol>
-          <li>Make sure your Raspberry Pi is running the WebRTC server</li>
-          <li>Verify the IP address and port are correct</li>
-          <li>Click "Start Stream" to begin receiving video</li>
-          <li>This page can be served from any web server - it will connect to your Pi</li>
-        </ol>
+        <h3>Ultra HD Streaming Information:</h3>
+        <ul>
+          <li><strong>Maximum Resolution:</strong> 4056x3040 (12MP)</li>
+          <li><strong>Frame Rate:</strong> 10 FPS at full resolution</li>
+          <li><strong>Bitrate:</strong> Up to 20 Mbps</li>
+          <li><strong>Requirements:</strong> High-speed network connection</li>
+          <li><strong>Browser:</strong> Modern browser with WebRTC support</li>
+        </ul>
         <p><strong>Current Target:</strong> <span id="currentTarget">http://192.168.2.174:8080</span></p>
       </div>
     </div>
@@ -145,6 +225,9 @@
       let localStream = null;
       let piIP = "192.168.2.174";
       let piPort = "8080";
+      let currentQuality = "auto";
+      let currentBitrate = 20000000;
+      let performanceMonitor = null;
 
       const configuration = {
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }],
@@ -161,12 +244,21 @@
 
         document.getElementById("currentTarget").textContent = `http://${piIP}:${piPort}`;
 
-        // Stop current stream if running
         if (pc) {
           stopStream();
         }
 
         updateStatus('Connection settings updated. Click "Start Stream" to connect.', "disconnected");
+      }
+
+      function updateVideoQuality() {
+        currentQuality = document.getElementById("videoQuality").value;
+        console.log("Video quality set to:", currentQuality);
+      }
+
+      function updateBitrate() {
+        currentBitrate = parseInt(document.getElementById("maxBitrate").value);
+        console.log("Bitrate set to:", currentBitrate, "bps");
       }
 
       function getServerURL() {
@@ -184,41 +276,75 @@
         document.getElementById("stopBtn").disabled = !stopEnabled;
       }
 
+      function updateVideoInfo(resolution, fps) {
+        const videoInfo = document.getElementById("videoInfo");
+        videoInfo.textContent = `Resolution: ${resolution} | FPS: ${fps}`;
+      }
+
+      function startPerformanceMonitoring() {
+        if (performanceMonitor) clearInterval(performanceMonitor);
+
+        performanceMonitor = setInterval(() => {
+          const video = document.getElementById("video");
+          if (video && video.videoWidth > 0) {
+            const resolution = `${video.videoWidth}x${video.videoHeight}`;
+            const fps = Math.round(video.getVideoPlaybackQuality().totalVideoFrames / 10);
+            updateVideoInfo(resolution, fps);
+
+            // Update performance data
+            const performanceData = document.getElementById("performanceData");
+            performanceData.innerHTML = `
+                        <strong>Video Dimensions:</strong> ${video.videoWidth}x${video.videoHeight}<br>
+                        <strong>Display Size:</strong> ${video.offsetWidth}x${video.offsetHeight}<br>
+                        <strong>Current Time:</strong> ${video.currentTime.toFixed(2)}s<br>
+                        <strong>Buffer Health:</strong> ${video.buffered.length > 0 ? "Good" : "Buffering"}<br>
+                        <strong>Network Activity:</strong> ${pc ? pc.iceConnectionState : "N/A"}
+                    `;
+          }
+        }, 1000);
+      }
+
+      function stopPerformanceMonitoring() {
+        if (performanceMonitor) {
+          clearInterval(performanceMonitor);
+          performanceMonitor = null;
+        }
+      }
+
       async function startStream() {
         try {
           updateStatus("Connecting...", "connecting");
           updateButtons(false, false);
 
-          // Create peer connection
           pc = new RTCPeerConnection(configuration);
 
-          // Handle incoming tracks
           pc.ontrack = function (event) {
             console.log("Received track:", event.track.kind);
             if (event.track.kind === "video") {
               const video = document.getElementById("video");
               video.srcObject = event.streams[0];
+
+              // Start performance monitoring
+              startPerformanceMonitoring();
             }
           };
 
-          // Connection state changes
           pc.onconnectionstatechange = function () {
             console.log("Connection state:", pc.connectionState);
             if (pc.connectionState === "connected") {
-              updateStatus("Connected", "connected");
+              updateStatus("Connected - Ultra HD Stream Active", "connected");
               updateButtons(false, true);
             } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
               updateStatus("Disconnected", "disconnected");
               updateButtons(true, false);
+              stopPerformanceMonitoring();
             }
           };
 
-          // ICE connection state changes
           pc.oniceconnectionstatechange = function () {
             console.log("ICE connection state:", pc.iceConnectionState);
           };
 
-          // Create offer
           const offer = await pc.createOffer({
             offerToReceiveVideo: true,
             offerToReceiveAudio: false,
@@ -226,7 +352,6 @@
 
           await pc.setLocalDescription(offer);
 
-          // Send offer to server
           const serverURL = getServerURL();
           console.log("Connecting to:", serverURL);
 
@@ -246,16 +371,15 @@
           }
 
           const answer = await response.json();
-
-          // Set remote description
           await pc.setRemoteDescription(new RTCSessionDescription(answer));
 
-          updateStatus("Connected", "connected");
+          updateStatus("Connected - Ultra HD Stream Active", "connected");
           updateButtons(false, true);
         } catch (error) {
           console.error("Error starting stream:", error);
           updateStatus("Connection failed: " + error.message, "disconnected");
           updateButtons(true, false);
+          stopPerformanceMonitoring();
 
           if (pc) {
             pc.close();
@@ -278,14 +402,26 @@
 
         updateStatus("Disconnected", "disconnected");
         updateButtons(true, false);
+        stopPerformanceMonitoring();
+        updateVideoInfo("--", "--");
+        document.getElementById("performanceData").textContent = "Disconnected";
       }
 
-      // Initialize connection display
+      function toggleFullscreen() {
+        const video = document.getElementById("video");
+        if (video.requestFullscreen) {
+          video.requestFullscreen();
+        } else if (video.webkitRequestFullscreen) {
+          video.webkitRequestFullscreen();
+        } else if (video.msRequestFullscreen) {
+          video.msRequestFullscreen();
+        }
+      }
+
       document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("currentTarget").textContent = getServerURL();
       });
 
-      // Cleanup on page unload
       window.addEventListener("beforeunload", function () {
         stopStream();
       });

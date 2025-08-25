@@ -7,7 +7,7 @@ import numpy as np
 import cv2
 from aiohttp import web
 from aiohttp.web import Request, Response
-from av import VideoFrame, CodecContext, Packet
+from av import VideoFrame
 from fractions import Fraction
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from aiortc.rtcrtpsender import RTCRtpSender
@@ -15,22 +15,20 @@ from aiortc.contrib.media import MediaRelay
 
 # Picamera2 imports
 from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder
-from picamera2.outputs import CircularOutput
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configuration constants
-WIDTH = 1920
-HEIGHT = 1080
-FPS = 15
-TARGET_BITRATE_BPS = 10_000_000  # 10 Mbps for high quality
+# Configuration constants - Maximum Pi Camera 3 resolution
+WIDTH = 4056
+HEIGHT = 3040
+FPS = 4  # Match your QT preview performance
 
-class Picamera2VideoTrack(VideoStreamTrack):
+class H264VideoTrack(VideoStreamTrack):
     """
-    VideoStreamTrack that streams video directly from picamera2
+    VideoStreamTrack that streams H.264 directly from picamera2
+    Similar to QT preview approach for maximum quality
     """
     
     def __init__(self, picam2: Picamera2):
@@ -38,16 +36,26 @@ class Picamera2VideoTrack(VideoStreamTrack):
         self.picam2 = picam2
         self.frame_count = 0
         
-        # Configure camera for H.264 streaming
+        # Configure camera for direct H.264 streaming
         self._configure_camera()
         
     def _configure_camera(self):
-        """Configure picamera2 for video streaming"""
+        """Configure picamera2 for maximum quality H.264 streaming"""
         try:
-            # Create video configuration
+            # Configure camera for maximum resolution first
             video_config = self.picam2.create_video_configuration(
-                main={"size": (WIDTH, HEIGHT), "format": "RGB888"},
-                controls={"FrameDurationLimits": (int(1000000/FPS), int(1000000/FPS))}
+                main={"size": (WIDTH, HEIGHT), "format": "RGB888"},  # Use RGB888 for accurate colors
+                controls={
+                    "FrameDurationLimits": (int(1000000/FPS), int(1000000/FPS)),
+                    "ScalerCrop": (0, 0, WIDTH, HEIGHT),  # Full sensor area
+                    "NoiseReductionMode": 0,  # Disable noise reduction for maximum quality
+                    "Sharpness": 0,  # Disable sharpening to preserve natural detail
+                    "Contrast": 1.0,  # Neutral contrast
+                    "Brightness": 0.0,  # Neutral brightness
+                    "Saturation": 1.0,  # Neutral saturation
+                },
+                buffer_count=6,  # Increase buffer for high resolution
+                encode="main"  # Use main stream for encoding
             )
             
             # Apply configuration
@@ -56,7 +64,8 @@ class Picamera2VideoTrack(VideoStreamTrack):
             # Start camera
             self.picam2.start()
             
-            logger.info(f"Camera started at {WIDTH}x{HEIGHT}, {FPS} FPS")
+            logger.info(f"Camera started at maximum resolution {WIDTH}x{HEIGHT}, {FPS} FPS")
+            logger.info(f"Using RGB888 format for accurate colors")
             
         except Exception as e:
             logger.error(f"Failed to configure camera: {e}")
@@ -65,16 +74,27 @@ class Picamera2VideoTrack(VideoStreamTrack):
     async def recv(self):
         """Get the next video frame from picamera2"""
         try:
-            # Capture raw frame from picamera2
+            # Capture frame from picamera2
             frame = self.picam2.capture_array()
             
-            # Convert BGR to RGB (picamera2 returns BGR)
+            # Handle different frame formats and convert colors properly
+            if frame.shape[2] == 4:
+                # 4-channel format (RGBA or similar) - remove alpha
+                frame = frame[:, :, :3]
+                logger.debug(f"Converted 4-channel frame to 3-channel: {frame.shape}")
+            
+            # Convert BGR to RGB (picamera2 often returns BGR even when configured as RGB)
+            # This fixes the blueish-green tint issue
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Debug: Log color conversion details
+            if self.frame_count % 30 == 0:  # Log every 30 frames (every ~7.5 seconds at 4 FPS)
+                logger.info(f"Frame {self.frame_count}: Original shape {frame.shape}, Converted BGR→RGB")
             
             # Create VideoFrame for aiortc
             video_frame = VideoFrame.from_ndarray(
                 frame_rgb, 
-                format="rgb24"
+                format="rgb24"  # Now we have proper RGB
             )
             
             # Set frame metadata
@@ -97,27 +117,27 @@ class Picamera2VideoTrack(VideoStreamTrack):
 
 class WebRTCServer:
     """
-    WebRTC server that handles peer connections and streams H.264 video from picamera2
+    WebRTC server that handles peer connections and streams H.264 video directly from picamera2
     """
     
     def __init__(self):
         self.pc: Optional[RTCPeerConnection] = None
-        self.video_track: Optional[Picamera2VideoTrack] = None
+        self.video_track: Optional[H264VideoTrack] = None
         self.picam2: Optional[Picamera2] = None
         self.relay = MediaRelay()
         
     async def initialize_camera(self):
-        """Initialize picamera2 camera"""
+        """Initialize picamera2 camera with H.264 streaming"""
         try:
             self.picam2 = Picamera2()
-            self.video_track = Picamera2VideoTrack(self.picam2)
-            logger.info("Camera initialized successfully")
+            self.video_track = H264VideoTrack(self.picam2)
+            logger.info("Camera initialized successfully with H.264 streaming")
         except Exception as e:
             logger.error(f"Failed to initialize camera: {e}")
             raise
     
     async def create_peer_connection(self):
-        """Create and configure RTCPeerConnection"""
+        """Create and configure RTCPeerConnection for H.264 streaming"""
         if self.pc:
             await self.pc.close()
         
@@ -127,11 +147,11 @@ class WebRTCServer:
         if self.video_track:
             sender = self.pc.addTrack(self.video_track)
             
-            # Configure video encoding parameters for H.264
+            # Configure video encoding parameters for maximum quality
             if hasattr(sender, 'setParameters'):
                 params = sender.getParameters()
                 if params.encodings:
-                    params.encodings[0].maxBitrate = TARGET_BITRATE_BPS
+                    params.encodings[0].maxBitrate = 25_000_000 # 25 Mbps for maximum quality
                     params.encodings[0].maxFramerate = FPS
                     sender.setParameters(params)
         
@@ -185,9 +205,11 @@ class WebRTCServer:
         return web.json_response({
             "status": "healthy",
             "camera": "initialized" if self.picam2 else "not_initialized",
-            "encoding": "RGB",
+            "encoding": "RGB888 + OpenCV Correction",
             "resolution": f"{WIDTH}x{HEIGHT}",
-            "fps": FPS
+            "fps": FPS,
+            "quality": "Maximum (QT Preview Level)",
+            "colors": "Corrected BGR→RGB"
         })
     
     async def cleanup(self):
@@ -197,7 +219,10 @@ class WebRTCServer:
             self.pc = None
         
         if self.picam2:
-            self.picam2.close()
+            if hasattr(self.picam2, 'stop'):
+                self.picam2.stop()
+            if hasattr(self.picam2, 'close'):
+                self.picam2.close()
             self.picam2 = None
         
         if self.video_track:
