@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Picamera2 WebRTC Stream</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f0f0f0;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        text-align: center;
+      }
+      .video-container {
+        margin: 20px 0;
+        background: #000;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+      video {
+        width: 100%;
+        max-width: 800px;
+        height: auto;
+        display: block;
+      }
+      .controls {
+        margin: 20px 0;
+      }
+      button {
+        background-color: #007bff;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        margin: 0 10px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+        transition: background-color 0.3s;
+      }
+      button:hover {
+        background-color: #0056b3;
+      }
+      button:disabled {
+        background-color: #6c757d;
+        cursor: not-allowed;
+      }
+      .status {
+        margin: 20px 0;
+        padding: 15px;
+        border-radius: 5px;
+        font-weight: bold;
+      }
+      .status.connected {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      .status.disconnected {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+      .status.connecting {
+        background-color: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeaa7;
+      }
+      .config-section {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        margin: 20px 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      .config-section input {
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 16px;
+        margin: 0 10px;
+        width: 200px;
+      }
+      .config-section label {
+        font-weight: bold;
+        margin-right: 10px;
+      }
+      .info-box {
+        background: #e7f3ff;
+        border: 1px solid #b3d9ff;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 20px 0;
+        text-align: left;
+      }
+      .info-box h3 {
+        margin-top: 0;
+        color: #0056b3;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Picamera2 WebRTC Stream</h1>
+
+      <div class="config-section">
+        <h3>Connection Settings</h3>
+        <label for="piIP">Raspberry Pi IP:</label>
+        <input type="text" id="piIP" value="192.168.2.174" placeholder="Enter Pi IP address" />
+        <label for="piPort">Port:</label>
+        <input type="text" id="piPort" value="8080" placeholder="8080" />
+        <button onclick="updateConnection()">Update Connection</button>
+      </div>
+
+      <div class="status disconnected" id="status">Disconnected</div>
+
+      <div class="controls">
+        <button id="startBtn" onclick="startStream()">Start Stream</button>
+        <button id="stopBtn" onclick="stopStream()" disabled>Stop Stream</button>
+      </div>
+
+      <div class="video-container">
+        <video id="video" autoplay playsinline muted></video>
+      </div>
+
+      <div class="info-box">
+        <h3>How to Use:</h3>
+        <ol>
+          <li>Make sure your Raspberry Pi is running the WebRTC server</li>
+          <li>Verify the IP address and port are correct</li>
+          <li>Click "Start Stream" to begin receiving video</li>
+          <li>This page can be served from any web server - it will connect to your Pi</li>
+        </ol>
+        <p><strong>Current Target:</strong> <span id="currentTarget">http://192.168.2.174:8080</span></p>
+      </div>
+    </div>
+
+    <script>
+      let pc = null;
+      let localStream = null;
+      let piIP = "192.168.2.174";
+      let piPort = "8080";
+
+      const configuration = {
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }],
+      };
+
+      function updateConnection() {
+        piIP = document.getElementById("piIP").value.trim();
+        piPort = document.getElementById("piPort").value.trim();
+
+        if (!piIP || !piPort) {
+          alert("Please enter both IP address and port");
+          return;
+        }
+
+        document.getElementById("currentTarget").textContent = `http://${piIP}:${piPort}`;
+
+        // Stop current stream if running
+        if (pc) {
+          stopStream();
+        }
+
+        updateStatus('Connection settings updated. Click "Start Stream" to connect.', "disconnected");
+      }
+
+      function getServerURL() {
+        return `http://${piIP}:${piPort}`;
+      }
+
+      function updateStatus(message, className) {
+        const status = document.getElementById("status");
+        status.textContent = message;
+        status.className = `status ${className}`;
+      }
+
+      function updateButtons(startEnabled, stopEnabled) {
+        document.getElementById("startBtn").disabled = !startEnabled;
+        document.getElementById("stopBtn").disabled = !stopEnabled;
+      }
+
+      async function startStream() {
+        try {
+          updateStatus("Connecting...", "connecting");
+          updateButtons(false, false);
+
+          // Create peer connection
+          pc = new RTCPeerConnection(configuration);
+
+          // Handle incoming tracks
+          pc.ontrack = function (event) {
+            console.log("Received track:", event.track.kind);
+            if (event.track.kind === "video") {
+              const video = document.getElementById("video");
+              video.srcObject = event.streams[0];
+            }
+          };
+
+          // Connection state changes
+          pc.onconnectionstatechange = function () {
+            console.log("Connection state:", pc.connectionState);
+            if (pc.connectionState === "connected") {
+              updateStatus("Connected", "connected");
+              updateButtons(false, true);
+            } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+              updateStatus("Disconnected", "disconnected");
+              updateButtons(true, false);
+            }
+          };
+
+          // ICE connection state changes
+          pc.oniceconnectionstatechange = function () {
+            console.log("ICE connection state:", pc.iceConnectionState);
+          };
+
+          // Create offer
+          const offer = await pc.createOffer({
+            offerToReceiveVideo: true,
+            offerToReceiveAudio: false,
+          });
+
+          await pc.setLocalDescription(offer);
+
+          // Send offer to server
+          const serverURL = getServerURL();
+          console.log("Connecting to:", serverURL);
+
+          const response = await fetch(`${serverURL}/offer`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              sdp: offer.sdp,
+              type: offer.type,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const answer = await response.json();
+
+          // Set remote description
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+          updateStatus("Connected", "connected");
+          updateButtons(false, true);
+        } catch (error) {
+          console.error("Error starting stream:", error);
+          updateStatus("Connection failed: " + error.message, "disconnected");
+          updateButtons(true, false);
+
+          if (pc) {
+            pc.close();
+            pc = null;
+          }
+        }
+      }
+
+      function stopStream() {
+        if (pc) {
+          pc.close();
+          pc = null;
+        }
+
+        const video = document.getElementById("video");
+        if (video.srcObject) {
+          video.srcObject.getTracks().forEach((track) => track.stop());
+          video.srcObject = null;
+        }
+
+        updateStatus("Disconnected", "disconnected");
+        updateButtons(true, false);
+      }
+
+      // Initialize connection display
+      document.addEventListener("DOMContentLoaded", function () {
+        document.getElementById("currentTarget").textContent = getServerURL();
+      });
+
+      // Cleanup on page unload
+      window.addEventListener("beforeunload", function () {
+        stopStream();
+      });
+    </script>
+  </body>
+</html>
