@@ -73,7 +73,7 @@ class PiCameraStream(MediaStreamTrack):
     """
     kind = "video"
 
-    def __init__(self, size=(1280, 720), bitrate=4_000_000):
+    def __init__(self, size=(1920, 1080), bitrate=10_000_000):
         super().__init__()  # initialize MediaStreamTrack
         # capture current running loop (important: Picamera callback runs in another thread)
         try:
@@ -150,16 +150,13 @@ def create_local_tracks() -> tuple[Optional[MediaStreamTrack], Optional[MediaStr
     # In order to serve the same webcam to multiple users we make use of
     # a `MediaRelay`. The webcam will stay open, so it is our responsability
     # to stop the webcam when the application shuts down in `on_shutdown`.
-    options = {"framerate": "30", "video_size": "640x480"}
+    resolution = (1920, 1080)
+    if args.resolution:
+        resolution = tuple(map(int, args.resolution.split("x")))
+
     if relay is None:
-        if platform.system() == "Windows":
-            webcam = MediaPlayer(
-                "video=JOYACCESS JA-Webcam", format="dshow", options=options
-            )
-            track = webcam  # already a MediaStreamTrack
-        else:
-            webcam = PiCameraStream()
-            track = webcam  # already a MediaStreamTrack
+        webcam = PiCameraStream(size=resolution)
+        track = webcam  # already a MediaStreamTrack
         relay = MediaRelay()
     return None, relay.subscribe(track)
 
@@ -245,6 +242,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WebRTC webcam demo")
     parser.add_argument("--cert-file", help="SSL certificate file (for HTTPS)")
     parser.add_argument("--key-file", help="SSL key file (for HTTPS)")
+    parser.add_argument(
+        "--resolution",
+        type=str,
+        help="Set custom video resolution as WIDTHxHEIGHT (e.g. 1280x720)",
+    )
+    parser.add_argument(
+        "--play-without-decoding",
+        help=(
+            "Read the media without decoding it (experimental). "
+            "For now it only works with an MPEGTS container with only H.264 video."
+        ),
+        action="store_true",
+    )
     parser.add_argument(
         "--host", default="0.0.0.0", help="Host for HTTP server (default: 0.0.0.0)"
     )
