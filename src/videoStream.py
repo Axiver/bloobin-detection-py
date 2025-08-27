@@ -1,299 +1,279 @@
-import os
+import argparse
 import asyncio
 import json
 import logging
+import os
+import platform
+import ssl
+import av
+import time
 from typing import Optional
-import numpy as np
-import cv2
-from aiohttp import web
-from aiohttp.web import Request, Response
-from av import VideoFrame
 from fractions import Fraction
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
-from aiortc.rtcrtpsender import RTCRtpSender
-from aiortc.contrib.media import MediaRelay
 
-# Picamera2 imports
+from aiohttp import web
+from aiortc import (
+    MediaStreamTrack,
+    RTCPeerConnection,
+    RTCRtpSender,
+    RTCSessionDescription,
+)
+from aiortc.contrib.media import MediaPlayer, MediaRelay
+
 from picamera2 import Picamera2
+from picamera2.encoders import H264Encoder
+from picamera2.outputs import Output
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+ROOT = os.path.dirname(__file__)
 
-# Configuration constants - Maximum Pi Camera 3 resolution
-WIDTH = 4056
-HEIGHT = 3040
-FPS = 4  # Match your QT preview performance
+pcs = set()
+relay = None
+webcam = None
 
-class H264VideoTrack(VideoStreamTrack):
+
+class QueueOutput(Output):
     """
-    VideoStreamTrack that streams H.264 directly from picamera2
-    Similar to QT preview approach for maximum quality
+    Picamera2 Output that receives encoded H264 frames (bytes) and
+    puts av.Packet objects onto an asyncio.Queue for consumption.
     """
-    
-    def __init__(self, picam2: Picamera2):
+    def __init__(self, queue, loop):
         super().__init__()
-        self.picam2 = picam2
-        self.frame_count = 0
-        
-        # Configure camera for direct H.264 streaming
-        self._configure_camera()
-        
-    def _configure_camera(self):
-        """Configure picamera2 for maximum quality H.264 streaming"""
-        try:
-            # Configure camera for maximum resolution first
-            video_config = self.picam2.create_video_configuration(
-                main={"size": (WIDTH, HEIGHT), "format": "RGB888"},  # Use RGB888 for accurate colors
-                controls={
-                    "FrameDurationLimits": (int(1000000/FPS), int(1000000/FPS)),
-                    "ScalerCrop": (0, 0, WIDTH, HEIGHT),  # Full sensor area
-                    "NoiseReductionMode": 0,  # Disable noise reduction for maximum quality
-                    "Sharpness": 0,  # Disable sharpening to preserve natural detail
-                    "Contrast": 1.0,  # Neutral contrast
-                    "Brightness": 0.0,  # Neutral brightness
-                    "Saturation": 1.0,  # Neutral saturation
-                },
-                buffer_count=6,  # Increase buffer for high resolution
-                encode="main"  # Use main stream for encoding
-            )
-            
-            # Apply configuration
-            self.picam2.configure(video_config)
-            
-            # Start camera
-            self.picam2.start()
-            
-            logger.info(f"Camera started at maximum resolution {WIDTH}x{HEIGHT}, {FPS} FPS")
-            logger.info(f"Using RGB888 format for accurate colors")
-            
-        except Exception as e:
-            logger.error(f"Failed to configure camera: {e}")
-            raise
-    
-    async def recv(self):
-        """Get the next video frame from picamera2"""
-        try:
-            # Capture frame from picamera2
-            frame = self.picam2.capture_array()
-            
-            # Handle different frame formats and convert colors properly
-            if frame.shape[2] == 4:
-                # 4-channel format (RGBA or similar) - remove alpha
-                frame = frame[:, :, :3]
-                logger.debug(f"Converted 4-channel frame to 3-channel: {frame.shape}")
-            
-            # Convert BGR to RGB (picamera2 often returns BGR even when configured as RGB)
-            # This fixes the blueish-green tint issue
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Debug: Log color conversion details
-            if self.frame_count % 30 == 0:  # Log every 30 frames (every ~7.5 seconds at 4 FPS)
-                logger.info(f"Frame {self.frame_count}: Original shape {frame.shape}, Converted BGR→RGB")
-            
-            # Create VideoFrame for aiortc
-            video_frame = VideoFrame.from_ndarray(
-                frame_rgb, 
-                format="rgb24"  # Now we have proper RGB
-            )
-            
-            # Set frame metadata
-            video_frame.pts = self.frame_count
-            video_frame.time_base = Fraction(1, FPS)
-            
-            self.frame_count += 1
-            
-            return video_frame
-            
-        except Exception as e:
-            logger.error(f"Error capturing frame: {e}")
-            # Return a black frame as fallback
-            black_frame = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
-            video_frame = VideoFrame.from_ndarray(black_frame, format="rgb24")
-            video_frame.pts = self.frame_count
-            video_frame.time_base = Fraction(1, FPS)
-            self.frame_count += 1
-            return video_frame
+        self.queue = queue
+        self.loop = loop
+        self.frame_index = 0
 
-class WebRTCServer:
-    """
-    WebRTC server that handles peer connections and streams H.264 video directly from picamera2
-    """
-    
-    def __init__(self):
-        self.pc: Optional[RTCPeerConnection] = None
-        self.video_track: Optional[H264VideoTrack] = None
-        self.picam2: Optional[Picamera2] = None
-        self.relay = MediaRelay()
-        
-    async def initialize_camera(self):
-        """Initialize picamera2 camera with H.264 streaming"""
+    def outputframe(self, frame: bytes, keyframe=True, timestamp=None, packet=None, audio=None):
+        """
+        Called by Picamera2/encoder on each encoded frame.
+        Signature must match encoder expectations: (frame, keyframe, timestamp, packet, audio).
+        """
         try:
-            self.picam2 = Picamera2()
-            self.video_track = H264VideoTrack(self.picam2)
-            logger.info("Camera initialized successfully with H.264 streaming")
-        except Exception as e:
-            logger.error(f"Failed to initialize camera: {e}")
-            raise
-    
-    async def create_peer_connection(self):
-        """Create and configure RTCPeerConnection for H.264 streaming"""
-        if self.pc:
-            await self.pc.close()
-        
-        self.pc = RTCPeerConnection()
-        
-        # Add video track
-        if self.video_track:
-            sender = self.pc.addTrack(self.video_track)
-            
-            # Configure video encoding parameters for maximum quality
-            if hasattr(sender, 'setParameters'):
-                params = sender.getParameters()
-                if params.encodings:
-                    params.encodings[0].maxBitrate = 25_000_000 # 25 Mbps for maximum quality
-                    params.encodings[0].maxFramerate = FPS
-                    sender.setParameters(params)
-        
-        @self.pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            logger.info(f"Connection state: {self.pc.connectionState}")
-            if self.pc.connectionState == "failed":
-                await self.pc.close()
-                self.pc = None
-        
-        @self.pc.on("iceconnectionstatechange")
-        async def on_iceconnectionstatechange():
-            logger.info(f"ICE connection state: {self.pc.iceConnectionState}")
-        
-        @self.pc.on("track")
-        def on_track(track):
-            logger.info(f"Track {track.kind} received")
-        
-        return self.pc
-    
-    async def offer_handler(self, request: Request) -> Response:
-        """Handle WebRTC offer from client"""
-        try:
-            params = await request.json()
-            offer = RTCSessionDescription(
-                sdp=params["sdp"],
-                type=params["type"]
-            )
-            
-            # Create peer connection
-            pc = await self.create_peer_connection()
-            
-            # Set remote description
-            await pc.setRemoteDescription(offer)
-            
-            # Create answer
-            answer = await pc.createAnswer()
-            await pc.setLocalDescription(answer)
-            
-            return web.json_response({
-                "sdp": pc.localDescription.sdp,
-                "type": pc.localDescription.type
-            })
-            
-        except Exception as e:
-            logger.error(f"Error handling offer: {e}")
-            return web.json_response({"error": str(e)}, status=500)
-    
-    async def health_check(self, request: Request) -> Response:
-        """Health check endpoint"""
-        return web.json_response({
-            "status": "healthy",
-            "camera": "initialized" if self.picam2 else "not_initialized",
-            "encoding": "RGB888 + OpenCV Correction",
-            "resolution": f"{WIDTH}x{HEIGHT}",
-            "fps": FPS,
-            "quality": "Maximum (QT Preview Level)",
-            "colors": "Corrected BGR→RGB"
-        })
-    
-    async def cleanup(self):
-        """Cleanup resources"""
-        if self.pc:
-            await self.pc.close()
-            self.pc = None
-        
-        if self.picam2:
-            if hasattr(self.picam2, 'stop'):
-                self.picam2.stop()
-            if hasattr(self.picam2, 'close'):
-                self.picam2.close()
-            self.picam2 = None
-        
-        if self.video_track:
-            self.video_track = None
+            pkt = av.Packet(frame)
 
-async def create_app():
-    """Create and configure the web application"""
-    app = web.Application()
-    
-    # Create WebRTC server instance
-    webrtc_server = WebRTCServer()
-    
-    # Initialize camera
-    await webrtc_server.initialize_camera()
-    
-    # Add CORS middleware
-    async def cors_middleware(app, handler):
-        async def middleware(request):
-            if request.method == 'OPTIONS':
-                response = web.Response()
-                response.headers['Access-Control-Allow-Origin'] = '*'
-                response.headers['Access-Control-Allow-Methods'] = 'POST, GET, OPTIONS'
-                response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-                return response
+            # attach PTS if available
+            if timestamp is not None:
+                # timestamp in microseconds -> 90 kHz clock units
+                pkt.pts = int(timestamp * 90 / 1000)
             else:
-                response = await handler(request)
-                response.headers['Access-Control-Allow-Origin'] = '*'
-                return response
-        return middleware
-    
-    app.middlewares.append(cors_middleware)
-    
-    # Add routes
-    app.router.add_post("/offer", webrtc_server.offer_handler)
-    app.router.add_get("/health", webrtc_server.health_check)
-    
-    # Add static files for the client
-    app.router.add_static("/static", path="./static", name="static")
-    
-    # Store server instance in app for cleanup
-    app["webrtc_server"] = webrtc_server
-    
-    # Add cleanup on shutdown
-    async def on_shutdown(app):
-        await webrtc_server.cleanup()
-    
-    app.on_shutdown.append(on_shutdown)
-    
-    return app
+                # fallback: current time in µs -> 90 kHz
+                pts = int(time.time_ns() // 1000)
+                pkt.pts = int(pts * 90 / 1000)
 
-def main():
-    """Main entry point"""
-    try:
-        # Create and run the application
-        app = asyncio.run(create_app())
-        
-        # Run the server
-        web.run_app(
-            app,
-            host="0.0.0.0",
-            port=8080,
-            access_log=logger
+            pkt.time_base = Fraction(1, 90000)  # WebRTC expects 90kHz timebase
+            self.loop.call_soon_threadsafe(self.queue.put_nowait, pkt)
+            self.frame_index += 1
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+
+class PiCameraStream(MediaStreamTrack):
+    """
+    A MediaStreamTrack that yields already-encoded av.Packet (H.264) for passthrough.
+    Run server with: --play-without-decoding --video-codec video/H264
+    """
+    kind = "video"
+
+    def __init__(self, size=(1280, 720), bitrate=4_000_000):
+        super().__init__()  # initialize MediaStreamTrack
+        # capture current running loop (important: Picamera callback runs in another thread)
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # if called outside an event loop, fall back (shouldn't happen in aiohttp handler)
+            self.loop = asyncio.get_event_loop()
+
+        self.picam2 = Picamera2()
+
+        # Use an encoder-friendly format and resolution.
+        # YUV420 (YUV420) is commonly supported by hardware encoders.
+        # Prefer common sizes (1280x720, 1920x1080) — avoid sensor-native odd formats.
+        video_config = self.picam2.create_video_configuration(
+            main={"size": size, "format": "YUV420"},
+            encode="main",
         )
-        
-    except KeyboardInterrupt:
-        logger.info("Server stopped by user")
-    except Exception as e:
-        logger.error(f"Server error: {e}")
-        raise
+        self.picam2.configure(video_config)
+
+        # Create encoder with a sane bitrate
+        self.encoder = H264Encoder(bitrate)
+        self.queue = asyncio.Queue()
+
+        # Start recording to our QueueOutput which will push av.Packet into asyncio queue.
+        self.picam2.start_recording(self.encoder, QueueOutput(self.queue, self.loop))
+
+        # track running state
+        self._stopped = False
+
+    async def recv(self):
+        """
+        Return an av.Packet (encoded H264) for passthrough.
+        aiortc will accept av.Packet from recv() if configured to use encoded mode.
+        """
+        if self._stopped:
+            raise asyncio.CancelledError()
+
+        packet: av.Packet = await self.queue.get()
+
+        # aiortc expects packet objects; ensure they have pts and time_base if possible.
+        # Some aiortc versions expect packet.pts to be in stream time_base units (e.g. 1/90000).
+        # If your consumer complains, you may convert pts to 90kHz clock:
+        #   if hasattr(packet, "pts") and hasattr(packet, "time_base"):
+        #       packet.pts = int(packet.pts * (90_000 * packet.time_base))
+        return packet
+
+    def stop(self):
+        """
+        Stop Picamera2 and encoder cleanly.
+        """
+        if self._stopped:
+            return
+        self._stopped = True
+        try:
+            # stop_recording may raise if already stopped - ignore
+            self.picam2.stop_recording()
+        except Exception:
+            pass
+        try:
+            self.picam2.close()
+        except Exception:
+            pass
+        # also stop MediaStreamTrack base
+        try:
+            super().stop()
+        except Exception:
+            pass
+
+def create_local_tracks() -> tuple[Optional[MediaStreamTrack], Optional[MediaStreamTrack]]:
+    global relay, webcam
+
+    # Play from the system's default webcam.
+    #
+    # In order to serve the same webcam to multiple users we make use of
+    # a `MediaRelay`. The webcam will stay open, so it is our responsability
+    # to stop the webcam when the application shuts down in `on_shutdown`.
+    options = {"framerate": "30", "video_size": "640x480"}
+    if relay is None:
+        if platform.system() == "Windows":
+            webcam = MediaPlayer(
+                "video=JOYACCESS JA-Webcam", format="dshow", options=options
+            )
+            track = webcam  # already a MediaStreamTrack
+        else:
+            webcam = PiCameraStream()
+            track = webcam  # already a MediaStreamTrack
+        relay = MediaRelay()
+    return None, relay.subscribe(track)
+
+
+def force_codec(pc: RTCPeerConnection, sender: RTCRtpSender, forced_codec: str) -> None:
+    kind = forced_codec.split("/")[0]
+    codecs = RTCRtpSender.getCapabilities(kind).codecs
+    transceiver = next(t for t in pc.getTransceivers() if t.sender == sender)
+    transceiver.setCodecPreferences(
+        [codec for codec in codecs if codec.mimeType == forced_codec]
+    )
+
+
+async def index(request: web.Request) -> web.Response:
+    content = open(os.path.join(ROOT, "./static/index.html"), "r").read()
+    return web.Response(content_type="text/html", text=content)
+
+
+async def offer(request: web.Request) -> web.Response:
+    params = await request.json()
+    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+
+    pc = RTCPeerConnection()
+    pcs.add(pc)
+
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange() -> None:
+        print("Connection state is %s" % pc.connectionState)
+        if pc.connectionState == "failed":
+            await pc.close()
+            pcs.discard(pc)
+
+    # open media source
+    audio, video = create_local_tracks()
+
+    if audio:
+        audio_sender = pc.addTrack(audio)
+        if args.audio_codec:
+            force_codec(pc, audio_sender, args.audio_codec)
+        elif args.play_without_decoding:
+            raise Exception("You must specify the audio codec using --audio-codec")
+
+    if video:
+        video_sender = pc.addTrack(video)
+        if args.video_codec:
+            force_codec(pc, video_sender, args.video_codec)
+        elif args.play_without_decoding:
+            raise Exception("You must specify the video codec using --video-codec")
+
+    await pc.setRemoteDescription(offer)
+
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+
+    return web.Response(
+        content_type="application/json",
+        text=json.dumps(
+            {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+        ),
+    )
+
+
+async def on_shutdown(app: web.Application) -> None:
+    # Close peer connections.
+    coros = [pc.close() for pc in pcs]
+    await asyncio.gather(*coros)
+    pcs.clear()
+
+    # If a shared webcam was opened, stop it.
+    if webcam is not None:
+        if isinstance(webcam, MediaPlayer):
+            if webcam.video:
+                webcam.video.stop()
+            if webcam.audio:
+                webcam.audio.stop()
+            webcam.stop()
+        elif isinstance(webcam, PiCameraStream):
+            webcam.stop()
+
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="WebRTC webcam demo")
+    parser.add_argument("--cert-file", help="SSL certificate file (for HTTPS)")
+    parser.add_argument("--key-file", help="SSL key file (for HTTPS)")
+    parser.add_argument(
+        "--host", default="0.0.0.0", help="Host for HTTP server (default: 0.0.0.0)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8080, help="Port for HTTP server (default: 8080)"
+    )
+    parser.add_argument("--verbose", "-v", action="count")
+    parser.add_argument(
+        "--audio-codec", help="Force a specific audio codec (e.g. audio/opus)"
+    )
+    parser.add_argument(
+        "--video-codec", help="Force a specific video codec (e.g. video/H264)"
+    )
 
-  
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    if args.cert_file:
+        ssl_context = ssl.SSLContext()
+        ssl_context.load_cert_chain(args.cert_file, args.key_file)
+    else:
+        ssl_context = None
+
+    app = web.Application()
+    app.on_shutdown.append(on_shutdown)
+    app.router.add_get("/", index)
+    app.router.add_post("/offer", offer)
+    web.run_app(app, host=args.host, port=args.port, ssl_context=ssl_context)
