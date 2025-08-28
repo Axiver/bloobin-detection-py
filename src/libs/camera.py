@@ -131,6 +131,8 @@ class PiCameraStream(MediaStreamTrack):
         # Start recording to our QueueOutput which will push av.Packet into asyncio queue.
         self.picam2.start_recording(self.encoder, QueueOutput(self.queue, self.loop))
 
+        print("PiCameraStream initialised")
+
         # track running state
         self._stopped = False
 
@@ -150,6 +152,12 @@ class PiCameraStream(MediaStreamTrack):
         #   if hasattr(packet, "pts") and hasattr(packet, "time_base"):
         #       packet.pts = int(packet.pts * (90_000 * packet.time_base))
         return packet
+
+    def capture_array(self):
+      if self._stopped:
+        raise asyncio.CancelledError()
+
+      return self.picam2.capture_array()
 
     def stop(self):
         """
