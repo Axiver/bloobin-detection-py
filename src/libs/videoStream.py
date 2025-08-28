@@ -5,9 +5,11 @@ import logging
 import os
 import platform
 import ssl
+import sys
 from typing import Optional
 
 from aiohttp import web
+import aiohttp_cors
 from aiortc import (
     MediaStreamTrack,
     RTCPeerConnection,
@@ -22,12 +24,16 @@ args = None
 pcs = set()
 relay = None
 webcam = None
+track = None
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 """
 Create WebRTC streamable tracks
 """
 def create_local_tracks() -> tuple[Optional[MediaStreamTrack], Optional[MediaStreamTrack]]:
-    global relay, webcam
+    global relay, webcam, track
 
     # Play from the system's default webcam.
     #
@@ -45,21 +51,42 @@ def create_local_tracks() -> tuple[Optional[MediaStreamTrack], Optional[MediaStr
         # a `MediaRelay`. The webcam will stay open, so it is our responsability
         # to stop the webcam when the application shuts down in `on_shutdown`.
         options = {"framerate": "30", "video_size": f"{resolution[0]}x{resolution[1]}"} # Join the resolution tuple into a string
-        if relay is None:
-            if platform.system() == "Windows":
+        
+        if platform.system() == "Windows":
+            try:
                 webcam = MediaPlayer(
                     "video=JOYACCESS JA-Webcam", format="dshow", options=options
                 )
-                track = webcam.video # Get the MediaStreamTrack from the MediaPlayer
-            # else:
-            #     webcam = PiCameraStream(size=resolution)
-            #     track = webcam  # already a MediaStreamTrack
+                track = webcam.video  # Get the MediaStreamTrack from the MediaPlayer
+                logger.info("Successfully initialized webcam")
+            except Exception as e:
+                logger.error(f"Failed to initialize webcam: {e}")
+                # Try fallback to default webcam
+                try:
+                    logger.info("Attempting to use default webcam as fallback")
+                    webcam = MediaPlayer(
+                        "video=Integrated Webcam", format="dshow", options=options
+                    )
+                    track = webcam.video
+                    logger.info("Successfully initialized fallback webcam")
+                except Exception as fallback_e:
+                    logger.error(f"Fallback webcam also failed: {fallback_e}")
+                    track = None
+        # else:
+        #     webcam = PiCameraStream(size=resolution)
+        #     track = webcam  # already a MediaStreamTrack
+        
         relay = MediaRelay()
-    return None, relay.subscribe(track)
+    
+    # Only try to subscribe if we have a track
+    if track is not None:
+        return None, relay.subscribe(track)
+    else:
+        logger.warning("No video track available - server will run without video streaming")
+        return None, None
 
 
 def force_codec(pc: RTCPeerConnection, sender: RTCRtpSender, forced_codec: str) -> None:
-    print(f"Forcing codec to {forced_codec}")
     kind = forced_codec.split("/")[0]
     codecs = RTCRtpSender.getCapabilities(kind).codecs
     transceiver = next(t for t in pc.getTransceivers() if t.sender == sender)
@@ -124,6 +151,7 @@ async def offer(request: web.Request) -> web.Response:
 WebRTC shutdown handler
 """
 async def on_shutdown(app: web.Application) -> None:
+    logger.info("Shutting down WebRTC server...")
     # Close peer connections.
     coros = [pc.close() for pc in pcs]
     await asyncio.gather(*coros)
@@ -136,9 +164,9 @@ async def on_shutdown(app: web.Application) -> None:
                 webcam.video.stop()
             if webcam.audio:
                 webcam.audio.stop()
-            webcam.stop()
+            webcam._stop()
         # elif isinstance(webcam, PiCameraStream):
-        #     webcam.stop()
+        #     webcam._stop()
 
 """
 Runs the WebRTC server
@@ -148,6 +176,11 @@ def start_stream(serve_player=False):
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
+
+    # Disable aioice logging to reduce noise
+    logging.getLogger("aioice.ice").setLevel(logging.ERROR)
+    logging.getLogger("aioice.rtp").setLevel(logging.ERROR)
+    logging.getLogger("aioice.stun").setLevel(logging.ERROR)
 
     if args.cert_file:
         ssl_context = ssl.SSLContext()
@@ -162,7 +195,25 @@ def start_stream(serve_player=False):
     if serve_player:
         app.router.add_get("/", index)
 
-    web.run_app(app, host=args.host, port=args.port, ssl_context=ssl_context)
+    cors = aiohttp_cors.setup(app, defaults={
+        "*": aiohttp_cors.ResourceOptions(
+            allow_credentials=True,
+            expose_headers="*",
+            allow_headers="*",
+        )
+    })
+
+    for route in list(app.router.routes()):
+        cors.add(route)
+
+    try:
+        logger.info(f"Starting WebRTC server on {args.host}:{args.port}")
+        web.run_app(app, host=args.host, port=args.port, ssl_context=ssl_context)
+    except KeyboardInterrupt:
+        logger.info("Server stopped by user")
+    except Exception as e:
+        logger.error(f"Server error: {e}")
+        sys.exit(1)
 
 """
 Main handler for starting via CLI
