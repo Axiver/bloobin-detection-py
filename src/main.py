@@ -2,8 +2,9 @@
 from gpiozero import DistanceSensor
 from libs.gptApi import is_recyclable
 from libs.receptacle import toggle_receptacle
-from libs.camera import captureImage, init_camera
+from libs.camera import captureImage, init_camera, PiCameraStream
 from libs.videoStream import start_stream
+from libs.qrcode_handler import QRCodeDetector
 from time import sleep
 import os, base64, asyncio
 from dotenv import load_dotenv
@@ -92,10 +93,21 @@ async def main():
   # Initialise sensors
   init_sensors()
 
+  # Initialise the camera
+  picam_stream = PiCameraStream()
+
   # Start the WebRTC server
-  start_stream(stream_args={"play_without_decoding": True, "video_codec": "video/H264"}, threaded=True)
+  start_stream(stream_args={"play_without_decoding": True, "video_codec": "video/H264"}, threaded=True, stream=picam_stream)
+
+  # Initialise the QR code detector
+  qr_detector = QRCodeDetector()
+    
+  while True:
+      frame = picam_stream.capture_array()  # numpy array
+      qr_codes = qr_detector.process_frame(frame)
+      print(qr_codes)
 
   # Check if there is an object in front of the sensor
-  await checkObject()
+  # await checkObject()
 
 asyncio.run(main())
