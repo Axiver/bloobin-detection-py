@@ -15,7 +15,7 @@ from aiortc import (
     RTCSessionDescription,
 )
 from aiortc.contrib.media import MediaPlayer, MediaRelay
-from libs.camera import PiCameraStream
+# from libs.camera import PiCameraStream
 
 ROOT = os.path.dirname(__file__)
 args = None
@@ -44,21 +44,22 @@ def create_local_tracks() -> tuple[Optional[MediaStreamTrack], Optional[MediaStr
         # In order to serve the same webcam to multiple users we make use of
         # a `MediaRelay`. The webcam will stay open, so it is our responsability
         # to stop the webcam when the application shuts down in `on_shutdown`.
-        options = {"framerate": "30", "video_size": resolution.join("x")}
+        options = {"framerate": "30", "video_size": f"{resolution[0]}x{resolution[1]}"} # Join the resolution tuple into a string
         if relay is None:
             if platform.system() == "Windows":
                 webcam = MediaPlayer(
                     "video=JOYACCESS JA-Webcam", format="dshow", options=options
                 )
-                track = webcam  # already a MediaStreamTrack
-            else:
-                webcam = PiCameraStream(size=resolution)
-                track = webcam  # already a MediaStreamTrack
+                track = webcam.video # Get the MediaStreamTrack from the MediaPlayer
+            # else:
+            #     webcam = PiCameraStream(size=resolution)
+            #     track = webcam  # already a MediaStreamTrack
         relay = MediaRelay()
     return None, relay.subscribe(track)
 
 
 def force_codec(pc: RTCPeerConnection, sender: RTCRtpSender, forced_codec: str) -> None:
+    print(f"Forcing codec to {forced_codec}")
     kind = forced_codec.split("/")[0]
     codecs = RTCRtpSender.getCapabilities(kind).codecs
     transceiver = next(t for t in pc.getTransceivers() if t.sender == sender)
@@ -70,7 +71,7 @@ def force_codec(pc: RTCPeerConnection, sender: RTCRtpSender, forced_codec: str) 
 Serve the WebRTC player
 """
 async def index(request: web.Request) -> web.Response:
-    content = open(os.path.join(ROOT, "./static/index.html"), "r").read()
+    content = open(os.path.join(ROOT, "../static/index.html"), "r").read()
     return web.Response(content_type="text/html", text=content)
 
 """
@@ -136,8 +137,8 @@ async def on_shutdown(app: web.Application) -> None:
             if webcam.audio:
                 webcam.audio.stop()
             webcam.stop()
-        elif isinstance(webcam, PiCameraStream):
-            webcam.stop()
+        # elif isinstance(webcam, PiCameraStream):
+        #     webcam.stop()
 
 """
 Runs the WebRTC server
