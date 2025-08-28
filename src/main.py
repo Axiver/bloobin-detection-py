@@ -3,6 +3,7 @@ from gpiozero import DistanceSensor
 from libs.gptApi import is_recyclable
 from libs.receptacle import toggle_receptacle
 from libs.camera import captureImage, init_camera
+from libs.videoStream import start_stream
 from time import sleep
 import os, base64, asyncio
 from dotenv import load_dotenv
@@ -39,7 +40,7 @@ def init_sensors():
   sensor = DistanceSensor(trigger=23, echo=24, threshold_distance=THRESHOLD_DISTANCE / 100)
 
   # Initialise the camera
-  camera = init_camera()
+  # camera = init_camera()
   
   # Sleep for 2 seconds to allow the camera to warm up
   sleep(2)
@@ -80,7 +81,7 @@ async def checkObject():
 
       if not isBusy:
           isBusy = True # Prevent multiple simultaneous processing
-          asyncio.create_task(processObject())
+          # asyncio.create_task(processObject())
     # else:
       # print("No object detected. Sleeping...")
     
@@ -90,6 +91,9 @@ async def checkObject():
 async def main():
   # Initialise sensors
   init_sensors()
+
+  # Start the WebRTC server
+  start_stream(stream_args={"play_without_decoding": True, "video_codec": "video/H264"}, threaded=True)
 
   # Check if there is an object in front of the sensor
   await checkObject()
