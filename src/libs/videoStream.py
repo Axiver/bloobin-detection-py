@@ -6,7 +6,7 @@ import os
 import platform
 import ssl
 import sys
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from aiohttp import web
 import aiohttp_cors
@@ -185,7 +185,10 @@ async def on_shutdown(app: web.Application) -> None:
 """
 Runs the WebRTC server
 """
-def start_stream(serve_player=False):
+def start_stream(serve_player=False, stream_args: Optional[Dict[str, Any]] = None):
+    global args
+    args = stream_args or args
+
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
     else:
