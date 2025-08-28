@@ -23,6 +23,9 @@ pcs = set()
 relay = None
 webcam = None
 
+"""
+Create WebRTC streamable tracks
+"""
 def create_local_tracks() -> tuple[Optional[MediaStreamTrack], Optional[MediaStreamTrack]]:
     global relay, webcam
 
@@ -63,12 +66,16 @@ def force_codec(pc: RTCPeerConnection, sender: RTCRtpSender, forced_codec: str) 
         [codec for codec in codecs if codec.mimeType == forced_codec]
     )
 
-
+"""
+Serve the WebRTC player
+"""
 async def index(request: web.Request) -> web.Response:
     content = open(os.path.join(ROOT, "./static/index.html"), "r").read()
     return web.Response(content_type="text/html", text=content)
 
-
+"""
+Handle the WebRTC offer
+"""
 async def offer(request: web.Request) -> web.Response:
     params = await request.json()
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
@@ -112,7 +119,9 @@ async def offer(request: web.Request) -> web.Response:
         ),
     )
 
-
+"""
+WebRTC shutdown handler
+"""
 async def on_shutdown(app: web.Application) -> None:
     # Close peer connections.
     coros = [pc.close() for pc in pcs]
@@ -131,9 +140,33 @@ async def on_shutdown(app: web.Application) -> None:
             webcam.stop()
 
 """
-CLI support - Runs the WebRTC server and serves a static player
+Runs the WebRTC server
 """
-def main():
+def start_stream(serve_player=False):
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    if args.cert_file:
+        ssl_context = ssl.SSLContext()
+        ssl_context.load_cert_chain(args.cert_file, args.key_file)
+    else:
+        ssl_context = None
+
+    app = web.Application()
+    app.on_shutdown.append(on_shutdown)
+    app.router.add_post("/offer", offer)
+
+    if serve_player:
+        app.router.add_get("/", index)
+
+    web.run_app(app, host=args.host, port=args.port, ssl_context=ssl_context)
+
+"""
+Main handler for starting via CLI
+"""
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WebRTC webcam demo")
     parser.add_argument("--cert-file", help="SSL certificate file (for HTTPS)")
     parser.add_argument("--key-file", help="SSL key file (for HTTPS)")
@@ -166,22 +199,4 @@ def main():
 
     args = parser.parse_args()
 
-    if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
-
-    if args.cert_file:
-        ssl_context = ssl.SSLContext()
-        ssl_context.load_cert_chain(args.cert_file, args.key_file)
-    else:
-        ssl_context = None
-
-    app = web.Application()
-    app.on_shutdown.append(on_shutdown)
-    app.router.add_get("/", index)
-    app.router.add_post("/offer", offer)
-    web.run_app(app, host=args.host, port=args.port, ssl_context=ssl_context)
-
-if __name__ == "__main__":
-    main()
+    start_stream(serve_player=True)
