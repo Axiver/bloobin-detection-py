@@ -105,47 +105,61 @@ async def index(request: web.Request) -> web.Response:
 Handle the WebRTC offer
 """
 async def offer(request: web.Request) -> web.Response:
-    params = await request.json()
-    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+    try:
+        params = await request.json()
+        offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
 
-    pc = RTCPeerConnection()
-    pcs.add(pc)
+        pc = RTCPeerConnection()
+        pcs.add(pc)
 
-    @pc.on("connectionstatechange")
-    async def on_connectionstatechange() -> None:
-        print("Connection state is %s" % pc.connectionState)
-        if pc.connectionState == "failed":
-            await pc.close()
-            pcs.discard(pc)
+        @pc.on("connectionstatechange")
+        async def on_connectionstatechange() -> None:
+            logger.info("Connection state is %s" % pc.connectionState)
+            if pc.connectionState == "failed":
+                await pc.close()
+                pcs.discard(pc)
 
-    # open media source
-    audio, video = create_local_tracks()
+        # open media source
+        audio, video = create_local_tracks()
 
-    if audio:
-        audio_sender = pc.addTrack(audio)
-        if args.audio_codec:
-            force_codec(pc, audio_sender, args.audio_codec)
-        elif args.play_without_decoding:
-            raise Exception("You must specify the audio codec using --audio-codec")
+        # Only add tracks if they exist
+        if audio:
+            audio_sender = pc.addTrack(audio)
+            if args.audio_codec:
+                force_codec(pc, audio_sender, args.audio_codec)
+            elif args.play_without_decoding:
+                raise Exception("You must specify the audio codec using --audio-codec")
 
-    if video:
-        video_sender = pc.addTrack(video)
-        if args.video_codec:
-            force_codec(pc, video_sender, args.video_codec)
-        elif args.play_without_decoding:
-            raise Exception("You must specify the video codec using --video-codec")
+        if video:
+            video_sender = pc.addTrack(video)
+            if args.video_codec:
+                force_codec(pc, video_sender, args.video_codec)
+            elif args.play_without_decoding:
+                raise Exception("You must specify the video codec using --video-codec")
 
-    await pc.setRemoteDescription(offer)
+        # Check if we have any media tracks
+        if not audio and not video:
+            logger.warning("No media tracks available - connection will be audio/video free")
 
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
+        await pc.setRemoteDescription(offer)
 
-    return web.Response(
-        content_type="application/json",
-        text=json.dumps(
-            {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
-        ),
-    )
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps(
+                {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Error in offer handler: {e}")
+        # Return a proper error response instead of crashing
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps({"error": str(e)}),
+            status=500
+        )
 
 """
 WebRTC shutdown handler
