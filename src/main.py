@@ -90,7 +90,7 @@ async def processObject():
         "identifiedMaterial": identifiedMaterial,
         "reasonForRejection": reasonForRejection,
         "receptacleMaterial": BIN_MODE,
-        "itemWeight": math.floor(random.random() * 50) # Random weight between 0 and 50 (Because we don't have the weight sensor hooked up yet)
+        "itemWeight": math.floor(random.random() * 16) # Random weight between 0 and 16 (Because we don't have the weight sensor hooked up yet)
       }
     })
 
