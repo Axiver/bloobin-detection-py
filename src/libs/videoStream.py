@@ -142,6 +142,11 @@ async def offer(request: web.Request) -> web.Response:
         if not audio and not video:
             logger.warning("No media tracks available - connection will be audio/video free")
 
+        # print(audio, video)
+        # print("Arguments:")
+        # for arg_name, arg_value in vars(args).items():
+        #     print(f"  {arg_name}: {arg_value}")
+
         await pc.setRemoteDescription(offer)
 
         answer = await pc.createAnswer()
@@ -236,9 +241,10 @@ Start the WebRTC server.
 :param serve_player: Whether to serve the index.html page
 :param stream_args: Optional dict of overrides for CLI args (e.g. resolution, video_codec)
 :param threaded: If True, run in a separate thread
+:param stream: The stream to use for the WebRTC server
 """
-def start_stream(serve_player=False, stream_args: Optional[Dict[str, Any]] = None, threaded: bool = False):
-    global args
+def start_stream(serve_player=False, stream_args: Optional[Dict[str, Any]] = None, threaded: bool = False, stream: MediaStreamTrack | None = None):
+    global args, track
 
     # Parse CLI args if not already set
     args = parse_args() if args is None else args
@@ -280,8 +286,12 @@ def start_stream(serve_player=False, stream_args: Optional[Dict[str, Any]] = Non
             allow_headers="*",
         )
     })
+
     for route in list(app.router.routes()):
         cors.add(route)
+
+    if stream is not None:
+        track = stream
 
     if threaded:
         # Run server in a separate thread

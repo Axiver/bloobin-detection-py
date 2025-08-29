@@ -2,8 +2,10 @@
 from gpiozero import DistanceSensor
 from libs.gptApi import is_recyclable
 from libs.receptacle import toggle_receptacle
-from libs.camera import captureImage, init_camera
+from libs.camera import captureImage, init_camera, PiCameraStream
 from libs.videoStream import start_stream
+from libs.qrcode_handler import QRCodeDetector
+from libs.socket_server import WebSocketServer
 from time import sleep
 import os, base64, asyncio
 from dotenv import load_dotenv
@@ -23,6 +25,9 @@ BIN_MODE = os.environ.get("BIN_MODE").upper()
 
 # Set log levels
 os.environ["LIBCAMERA_LOG_LEVELS"] = "3" # Configure libcamera to only log errors
+
+# Global variables
+qr_scanning_task = None  # Track the QR scanning task
 
 # Functions
 # Encode file to base64
@@ -87,13 +92,63 @@ async def checkObject():
     
     await asyncio.sleep(1)
 
+async def handle_qr_codes(qr_codes: list[str]):
+  global websocket_server
+  await websocket_server.broadcast_message({
+    "type": "qr_codes",
+    "data": qr_codes
+  })
+
+async def start_qr_scanning():
+  global qr_detector, qr_scanning_task
+  
+  # Cancel any existing scanning task
+  if qr_scanning_task and not qr_scanning_task.done():
+    qr_scanning_task.cancel()
+    try:
+      await qr_scanning_task
+    except asyncio.CancelledError:
+      pass
+  
+  # Start new scanning task
+  qr_scanning_task = asyncio.create_task(qr_detector.start_qr_scanning(handle_qr_codes))
+  print("QR scanning started")
+
+async def stop_qr_scanning():
+  global qr_detector, qr_scanning_task
+  
+  # Cancel the scanning task if it's running
+  if qr_scanning_task and not qr_scanning_task.done():
+    qr_scanning_task.cancel()
+    try:
+      await qr_scanning_task
+    except asyncio.CancelledError:
+      pass
+    qr_scanning_task = None
+    print("QR scanning stopped")
+  else:
+    print("No QR scanning task to stop")
+
 ## Main
 async def main():
+  global qr_detector, websocket_server
+
   # Initialise sensors
   init_sensors()
 
+  # Initialise the camera
+  picam_stream = PiCameraStream()
+
   # Start the WebRTC server
-  start_stream(stream_args={"play_without_decoding": True, "video_codec": "video/H264"}, threaded=True)
+  start_stream(stream_args={"play_without_decoding": True, "video_codec": "video/H264"}, threaded=True, stream=picam_stream)
+
+  # Initialise the QR code detector
+  qr_detector = QRCodeDetector(picam_stream)
+
+  # Start the WebSocket server
+  websocket_server = WebSocketServer(start_qr_scanning=start_qr_scanning, stop_qr_scanning=stop_qr_scanning)
+  await websocket_server.start_server()
+  # asyncio.create_task(websocket_server.keep_alive())
 
   # Check if there is an object in front of the sensor
   await checkObject()
