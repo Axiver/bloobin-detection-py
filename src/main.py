@@ -29,6 +29,7 @@ os.environ["LIBCAMERA_LOG_LEVELS"] = "3" # Configure libcamera to only log error
 # Global variables
 qr_scanning_task = None  # Track the QR scanning task
 picam_stream = None
+websocket_server = None
 
 # Functions
 # Encode file to base64
@@ -62,19 +63,22 @@ async def processObject():
     # image = captureImage(camera)
     image = picam_stream.capture_image()
 
-    print(image)
+    # Encode the image to base64
+    imageBase64 = base64_encode(image.getvalue())
 
-    # # Encode the image to base64
-    # imageBase64 = base64_encode(image.getvalue())
+    print("Sending image to GPT API...")
+    canBeRecycled = is_recyclable(imageBase64, BIN_MODE)
 
-    # print("Sending image to GPT API...")
-    # canBeRecycled = is_recyclable(imageBase64, BIN_MODE)
+    print(f"Can be recycled: {canBeRecycled}")
 
-    # print(f"Can be recycled: {canBeRecycled}")
+    await websocket_server.broadcast_message({
+      "type": "can_recycle",
+      "data": canBeRecycled
+    })
 
-    # # Act based on recyclability
-    # if canBeRecycled:
-    #   asyncio.create_task(toggle_receptacle())
+    # Act based on recyclability
+    if canBeRecycled:
+      asyncio.create_task(toggle_receptacle())
 
   finally:
     isBusy = False # Allow detection to process new objects
