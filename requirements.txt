@@ -33,3 +33,6 @@ numpy==1.26.4
 picamera2==0.3.12
 simplejpeg==1.3.4
 opencv-python==4.8.1.78
+
+# WebSocket dependencies
+websockets==11.0.3
