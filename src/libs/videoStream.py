@@ -142,10 +142,10 @@ async def offer(request: web.Request) -> web.Response:
         if not audio and not video:
             logger.warning("No media tracks available - connection will be audio/video free")
 
-        print(audio, video)
-        print("Arguments:")
-        for arg_name, arg_value in vars(args).items():
-            print(f"  {arg_name}: {arg_value}")
+        # print(audio, video)
+        # print("Arguments:")
+        # for arg_name, arg_value in vars(args).items():
+        #     print(f"  {arg_name}: {arg_value}")
 
         await pc.setRemoteDescription(offer)
 

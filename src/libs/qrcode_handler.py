@@ -37,7 +37,6 @@ class QRCodeDetector:
       for qr_code in qr_codes:
         qr_data = qr_code.data.decode("utf-8")
         results.append(qr_data)
-        print("QR Code Data:", qr_data)
     return results
 
   def process_frame(self, frame):

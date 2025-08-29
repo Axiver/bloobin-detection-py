@@ -91,7 +91,6 @@ async def checkObject():
 
 async def handle_qr_codes(qr_codes: list[str]):
   global websocket_server
-  print(f"QR codes detected: {qr_codes}")
   await websocket_server.broadcast_message({
     "type": "qr_codes",
     "data": qr_codes
