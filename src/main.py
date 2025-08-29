@@ -28,8 +28,12 @@ os.environ["LIBCAMERA_LOG_LEVELS"] = "3" # Configure libcamera to only log error
 
 # Global variables
 qr_scanning_task = None  # Track the QR scanning task
+recycling_processing_task = None  # Track the recycling processing task
+isBusy = False  # Track if currently processing an object
+sensor = None  # Ultrasonic sensor
 picam_stream = None
 websocket_server = None
+qr_detector = None  # QR code detector
 
 # Functions
 # Encode file to base64
@@ -151,6 +155,36 @@ async def stop_qr_scanning():
   else:
     print("No QR scanning task to stop")
 
+async def start_processing_recycle():
+  global recycling_processing_task
+  
+  # Cancel any existing processing task
+  if recycling_processing_task and not recycling_processing_task.done():
+    recycling_processing_task.cancel()
+    try:
+      await recycling_processing_task
+    except asyncio.CancelledError:
+      pass
+  
+  # Start new processing task
+  recycling_processing_task = asyncio.create_task(checkObject())
+  print("Recycling processing started")
+
+async def stop_processing_recycle():
+  global recycling_processing_task
+  
+  # Cancel the processing task if it's running
+  if recycling_processing_task and not recycling_processing_task.done():
+    recycling_processing_task.cancel()
+    try:
+      await recycling_processing_task
+    except asyncio.CancelledError:
+      pass
+    recycling_processing_task = None
+    print("Recycling processing stopped")
+  else:
+    print("No recycling processing task to stop")
+
 ## Main
 async def main():
   global qr_detector, websocket_server, picam_stream
@@ -168,11 +202,12 @@ async def main():
   qr_detector = QRCodeDetector(picam_stream)
 
   # Start the WebSocket server
-  websocket_server = WebSocketServer(start_qr_scanning=start_qr_scanning, stop_qr_scanning=stop_qr_scanning)
+  websocket_server = WebSocketServer(start_qr_scanning=start_qr_scanning, stop_qr_scanning=stop_qr_scanning, start_processing_recycle=start_processing_recycle, stop_processing_recycle=stop_processing_recycle)
   await websocket_server.start_server(threaded=True)
   # asyncio.create_task(websocket_server.keep_alive())
 
-  # Check if there is an object in front of the sensor
-  await checkObject()
+  # Keep the main function running - recycling processing will be started via WebSocket commands
+  while True:
+    await asyncio.sleep(1)
 
 asyncio.run(main())

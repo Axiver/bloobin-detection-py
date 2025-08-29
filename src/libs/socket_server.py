@@ -16,13 +16,15 @@ logging.basicConfig(
 
 class WebSocketServer:
   
-  def __init__(self, host: str = "0.0.0.0", port: int = 8765, start_qr_scanning: Callable[[], None] = None, stop_qr_scanning: Callable[[], None] = None):
+  def __init__(self, host: str = "0.0.0.0", port: int = 8765, start_qr_scanning: Callable[[], None] = None, stop_qr_scanning: Callable[[], None] = None, start_processing_recycle: Callable[[], None] = None, stop_processing_recycle: Callable[[], None] = None):
     self.host = host
     self.port = port
     self.clients: Set[ServerConnection] = set()
     self.running = False
     self.start_qr_scanning = start_qr_scanning
     self.stop_qr_scanning = stop_qr_scanning
+    self.start_processing_recycle = start_processing_recycle
+    self.stop_processing_recycle = stop_processing_recycle
     self.server_thread = None
 
   async def register_client(self, websocket: ServerConnection):
@@ -145,6 +147,23 @@ class WebSocketServer:
           'type': 'error',
           'message': 'QR scanning not supported'
         })
+
+    elif message_type == 'start_processing_recycle':
+      logger.info("Received start_processing_recycle request")
+      if self.start_processing_recycle:
+        try:
+          await self.start_processing_recycle()
+        except Exception as e:
+          logger.error(f"Error starting processing recycle: {e}")
+
+    elif message_type == 'stop_processing_recycle':
+      logger.info("Received stop_processing_recycle request")
+      if self.stop_processing_recycle:
+        try:
+          await self.stop_processing_recycle()
+        except Exception as e:
+          logger.error(f"Error stopping processing recycle: {e}")
+          
     else:
       logger.warning(f"Unknown message type received: {message_type}")
       await self.send_message(websocket, {
