@@ -80,6 +80,8 @@ async def checkObject():
   global isBusy
   isBusy = False
 
+  print("Checking for objects in front of the sensor...")
+
   while True:
     if sensor.distance < THRESHOLD_DISTANCE / 100:
       print("Object detected within threshold distance")
@@ -147,7 +149,7 @@ async def main():
 
   # Start the WebSocket server
   websocket_server = WebSocketServer(start_qr_scanning=start_qr_scanning, stop_qr_scanning=stop_qr_scanning)
-  await websocket_server.start_server()
+  await websocket_server.start_server(threaded=True)
   # asyncio.create_task(websocket_server.keep_alive())
 
   # Check if there is an object in front of the sensor
