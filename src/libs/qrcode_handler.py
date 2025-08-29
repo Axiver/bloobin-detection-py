@@ -1,6 +1,7 @@
 import cv2
 from pyzbar.pyzbar import decode
 from typing import Callable
+import asyncio
 
 class QRCodeDetector:
   def __init__(self, picam_stream):
@@ -50,11 +51,33 @@ class QRCodeDetector:
 
   async def start_qr_scanning(self, callback: Callable[[str], None]):
     self.scanning = True
-    while self.scanning is True:
-      frame = self.picam_stream.capture_array()  # numpy array
-      qr_codes = self.process_frame(frame)
-      if len(qr_codes) > 0:
-        await callback(qr_codes)
+    print("Starting QR code scanning")
+    
+    try:
+      while self.scanning:
+        # Check for cancellation
+        await asyncio.sleep(0)  # Yield control to allow cancellation
+        
+        frame = self.picam_stream.capture_array()  # numpy array
+        qr_codes = self.process_frame(frame)
+        if len(qr_codes) > 0:
+          await callback(qr_codes)
+        
+        # Small delay to prevent excessive CPU usage
+        await asyncio.sleep(0.5)
+        
+    except asyncio.CancelledError:
+      print("QR scanning task cancelled")
+      self.scanning = False
+      raise  # Re-raise to properly handle cancellation
+    except Exception as e:
+      print(f"Error in QR scanning: {e}")
+      self.scanning = False
+      raise
+    finally:
+      self.scanning = False
+      print("QR scanning task ended")
 
   async def stop_qr_scanning(self):
+    print("Stopping QR code scanning")
     self.scanning = False

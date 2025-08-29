@@ -26,6 +26,9 @@ BIN_MODE = os.environ.get("BIN_MODE").upper()
 # Set log levels
 os.environ["LIBCAMERA_LOG_LEVELS"] = "3" # Configure libcamera to only log errors
 
+# Global variables
+qr_scanning_task = None  # Track the QR scanning task
+
 # Functions
 # Encode file to base64
 def base64_encode(image):
@@ -97,12 +100,34 @@ async def handle_qr_codes(qr_codes: list[str]):
   })
 
 async def start_qr_scanning():
-  global qr_detector
-  asyncio.create_task(qr_detector.start_qr_scanning(handle_qr_codes)) # Start the QR code scanning in a new thread
+  global qr_detector, qr_scanning_task
+  
+  # Cancel any existing scanning task
+  if qr_scanning_task and not qr_scanning_task.done():
+    qr_scanning_task.cancel()
+    try:
+      await qr_scanning_task
+    except asyncio.CancelledError:
+      pass
+  
+  # Start new scanning task
+  qr_scanning_task = asyncio.create_task(qr_detector.start_qr_scanning(handle_qr_codes))
+  print("QR scanning started")
 
 async def stop_qr_scanning():
-  global qr_detector
-  qr_detector.stop_qr_scanning()
+  global qr_detector, qr_scanning_task
+  
+  # Cancel the scanning task if it's running
+  if qr_scanning_task and not qr_scanning_task.done():
+    qr_scanning_task.cancel()
+    try:
+      await qr_scanning_task
+    except asyncio.CancelledError:
+      pass
+    qr_scanning_task = None
+    print("QR scanning stopped")
+  else:
+    print("No QR scanning task to stop")
 
 ## Main
 async def main():

@@ -94,6 +94,8 @@ class WebSocketServer:
   async def process_message(self, websocket: ServerConnection, data: dict):
     """Process incoming messages based on their type."""
     message_type = data.get('type', 'unknown')
+    
+    logger.info(f"Processing message type: {message_type}")
 
     if message_type == 'ping':
       await self.send_message(websocket, {
@@ -101,8 +103,20 @@ class WebSocketServer:
       })
 
     elif message_type == 'start_qr_scanning':
+      logger.info("Received start_qr_scanning request")
       if self.start_qr_scanning:
-        await self.start_qr_scanning()
+        try:
+          await self.start_qr_scanning()
+          await self.send_message(websocket, {
+            'type': 'response',
+            'message': 'QR scanning started successfully'
+          })
+        except Exception as e:
+          logger.error(f"Error starting QR scanning: {e}")
+          await self.send_message(websocket, {
+            'type': 'error',
+            'message': f'Failed to start QR scanning: {str(e)}'
+          })
       else:
         await self.send_message(websocket, {
           'type': 'error',
@@ -110,14 +124,27 @@ class WebSocketServer:
         })
 
     elif message_type == 'stop_qr_scanning':
+      logger.info("Received stop_qr_scanning request")
       if self.stop_qr_scanning:
-        await self.stop_qr_scanning()
+        try:
+          await self.stop_qr_scanning()
+          await self.send_message(websocket, {
+            'type': 'response',
+            'message': 'QR scanning stopped successfully'
+          })
+        except Exception as e:
+          logger.error(f"Error stopping QR scanning: {e}")
+          await self.send_message(websocket, {
+            'type': 'error',
+            'message': f'Failed to stop QR scanning: {str(e)}'
+          })
       else:
         await self.send_message(websocket, {
           'type': 'error',
           'message': 'QR scanning not supported'
         })
     else:
+      logger.warning(f"Unknown message type received: {message_type}")
       await self.send_message(websocket, {
         'type': 'error',
         'message': f'Unknown message type: {message_type}'
