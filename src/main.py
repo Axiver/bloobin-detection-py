@@ -28,6 +28,7 @@ os.environ["LIBCAMERA_LOG_LEVELS"] = "3" # Configure libcamera to only log error
 
 # Global variables
 qr_scanning_task = None  # Track the QR scanning task
+picam_stream = None
 
 # Functions
 # Encode file to base64
@@ -58,19 +59,22 @@ async def processObject():
 
   try:
     # Capture and send the image
-    image = captureImage(camera)
+    # image = captureImage(camera)
+    image = picam_stream.capture_image()
 
-    # Encode the image to base64
-    imageBase64 = base64_encode(image.getvalue())
+    print(image)
 
-    print("Sending image to GPT API...")
-    canBeRecycled = is_recyclable(imageBase64, BIN_MODE)
+    # # Encode the image to base64
+    # imageBase64 = base64_encode(image.getvalue())
 
-    print(f"Can be recycled: {canBeRecycled}")
+    # print("Sending image to GPT API...")
+    # canBeRecycled = is_recyclable(imageBase64, BIN_MODE)
 
-    # Act based on recyclability
-    if canBeRecycled:
-      asyncio.create_task(toggle_receptacle())
+    # print(f"Can be recycled: {canBeRecycled}")
+
+    # # Act based on recyclability
+    # if canBeRecycled:
+    #   asyncio.create_task(toggle_receptacle())
 
   finally:
     isBusy = False # Allow detection to process new objects
@@ -88,9 +92,7 @@ async def checkObject():
 
       if not isBusy:
           isBusy = True # Prevent multiple simultaneous processing
-          # asyncio.create_task(processObject())
-    # else:
-      # print("No object detected. Sleeping...")
+          asyncio.create_task(processObject())
     
     await asyncio.sleep(1)
 
@@ -133,7 +135,7 @@ async def stop_qr_scanning():
 
 ## Main
 async def main():
-  global qr_detector, websocket_server
+  global qr_detector, websocket_server, picam_stream
 
   # Initialise sensors
   init_sensors()

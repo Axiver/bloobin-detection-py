@@ -145,8 +145,9 @@ class PiCameraStream(MediaStreamTrack):
         
         # Use an encoder-friendly format and resolution
         video_config = self.picam2.create_video_configuration(
-            main={"size": size, "format": "YUV420"},
-            encode="main",
+            main={"size": (4608, 2592)},
+            lores={"size": size, "format": "YUV420"},
+            encode="lores",
         )
         self.picam2.configure(video_config)
         
@@ -252,7 +253,9 @@ class PiCameraStream(MediaStreamTrack):
         try:
             with self._lock:
                 data = BytesIO()
-                self.picam2.capture_file(data, format=format)
+                request = self.picam2.capture_request()
+                request.save("main", "test.jpg")
+                request.release()
                 data.seek(0)  # Reset position to beginning
                 return data
         except Exception as e:
