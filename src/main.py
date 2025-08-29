@@ -67,17 +67,21 @@ async def processObject():
     imageBase64 = base64_encode(image.getvalue())
 
     print("Sending image to GPT API...")
-    canBeRecycled = is_recyclable(imageBase64, BIN_MODE)
+    canBeRecycled, identifiedMaterial, reasonForRejection = is_recyclable(imageBase64, BIN_MODE)
 
     print(f"Can be recycled: {canBeRecycled}")
 
     await websocket_server.broadcast_message({
       "type": "can_recycle",
-      "data": canBeRecycled
+      "data": {
+        "canBeRecycled": canBeRecycled,
+        "identifiedMaterial": identifiedMaterial,
+        "reasonForRejection": reasonForRejection
+      }
     })
 
     # Act based on recyclability
-    if canBeRecycled:
+    if canBeRecycled == True:
       asyncio.create_task(toggle_receptacle())
 
   finally:
