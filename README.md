@@ -18,3 +18,10 @@ hdmi_mode=87
 ```
 
 3. Save the file and reboot and you should be running at the native 1024x600 resolution.
+
+### Browser
+
+To launch the built-in chromium browser in full-screen mode, run the following command:
+`chromium-browser --start-fullscreen http://my_URL.com`
+
+The URL should point to the frontned of the project.
