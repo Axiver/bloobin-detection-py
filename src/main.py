@@ -7,7 +7,7 @@ from libs.videoStream import start_stream
 from libs.qrcode_handler import QRCodeDetector
 from libs.socket_server import WebSocketServer
 from time import sleep
-import os, base64, asyncio
+import os, base64, asyncio, math, random
 from dotenv import load_dotenv
 
 # 
@@ -66,6 +66,14 @@ async def processObject():
     # Encode the image to base64
     imageBase64 = base64_encode(image.getvalue())
 
+    # Send message to the client that the item is being processed
+    await websocket_server.broadcast_message({
+      "type": "processing_recycle",
+      "data": {
+        "receptacleMaterial": BIN_MODE
+      }
+    })
+
     print("Sending image to GPT API...")
     canBeRecycled, identifiedMaterial, reasonForRejection = is_recyclable(imageBase64, BIN_MODE)
 
@@ -78,6 +86,7 @@ async def processObject():
         "identifiedMaterial": identifiedMaterial,
         "reasonForRejection": reasonForRejection,
         "receptacleMaterial": BIN_MODE,
+        "itemWeight": math.floor(random.random() * 50) # Random weight between 0 and 50 (Because we don't have the weight sensor hooked up yet)
       }
     })
 
