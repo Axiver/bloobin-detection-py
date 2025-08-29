@@ -145,10 +145,13 @@ class PiCameraStream(MediaStreamTrack):
         
         # Use an encoder-friendly format and resolution
         video_config = self.picam2.create_video_configuration(
-            main={"size": size, "format": "YUV420"},
-            encode="main",
+            main={"size": (4608, 2592)},
+            lores={"size": size, "format": "YUV420"},
+            encode="lores",
         )
         self.picam2.configure(video_config)
+
+        self.picam2.set_controls({"AfMode": controls.AfModeEnum.Continuous, "AfRange": controls.AfRangeEnum.Macro, "AfSpeed": controls.AfSpeedEnum.Fast})
         
         # Create encoder with specified bitrate
         self.encoder = H264Encoder(bitrate)
@@ -217,23 +220,23 @@ class PiCameraStream(MediaStreamTrack):
         
         try:
             with self._lock:  # Ensure thread safety for camera operations
-                return self.picam2.capture_array()
+                return self.picam2.capture_array("main")
         except Exception as e:
             print(f"Error capturing frame: {e}")
             return None
 
-    def capture_image(self, format='jpeg'):
+    def capture_image(self):
         """
         Thread-safe access to capture_image from any thread.
         Returns a BytesIO object containing the captured image.
         """
         if threading.current_thread().ident == self._main_thread_id:
             # We're in the main thread, safe to call directly
-            return self._capture_image_direct(format)
+            return self._capture_image_direct()
         else:
             # We're in a different thread, use executor
             try:
-                future = self._executor.submit(self._capture_image_direct, format)
+                future = self._executor.submit(self._capture_image_direct)
                 return future.result(timeout=10.0)  # Longer timeout for image capture
             except TimeoutError:
                 print("Warning: capture_image() timed out after 10 seconds")
@@ -242,7 +245,7 @@ class PiCameraStream(MediaStreamTrack):
                 print(f"Error in capture_image(): {e}")
                 return None
 
-    def _capture_image_direct(self, format='jpeg'):
+    def _capture_image_direct(self):
         """
         Direct image capture - only call from main thread or via executor.
         """
@@ -252,8 +255,10 @@ class PiCameraStream(MediaStreamTrack):
         try:
             with self._lock:
                 data = BytesIO()
-                self.picam2.capture_file(data, format=format)
-                data.seek(0)  # Reset position to beginning
+                request = self.picam2.capture_request()
+                # request.save("main", "test.jpg")
+                request.save("main", data, format="jpeg")
+                request.release()
                 return data
         except Exception as e:
             print(f"Error capturing image: {e}")

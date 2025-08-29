@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import threading
 from typing import Callable, Set
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed, ConnectionClosedOK
@@ -15,13 +16,16 @@ logging.basicConfig(
 
 class WebSocketServer:
   
-  def __init__(self, host: str = "0.0.0.0", port: int = 8765, start_qr_scanning: Callable[[], None] = None, stop_qr_scanning: Callable[[], None] = None):
+  def __init__(self, host: str = "0.0.0.0", port: int = 8765, start_qr_scanning: Callable[[], None] = None, stop_qr_scanning: Callable[[], None] = None, start_processing_recycle: Callable[[], None] = None, stop_processing_recycle: Callable[[], None] = None):
     self.host = host
     self.port = port
     self.clients: Set[ServerConnection] = set()
     self.running = False
     self.start_qr_scanning = start_qr_scanning
     self.stop_qr_scanning = stop_qr_scanning
+    self.start_processing_recycle = start_processing_recycle
+    self.stop_processing_recycle = stop_processing_recycle
+    self.server_thread = None
 
   async def register_client(self, websocket: ServerConnection):
     """Register a new client connection."""
@@ -143,6 +147,23 @@ class WebSocketServer:
           'type': 'error',
           'message': 'QR scanning not supported'
         })
+
+    elif message_type == 'start_processing_recycle':
+      logger.info("Received start_processing_recycle request")
+      if self.start_processing_recycle:
+        try:
+          await self.start_processing_recycle()
+        except Exception as e:
+          logger.error(f"Error starting processing recycle: {e}")
+
+    elif message_type == 'stop_processing_recycle':
+      logger.info("Received stop_processing_recycle request")
+      if self.stop_processing_recycle:
+        try:
+          await self.stop_processing_recycle()
+        except Exception as e:
+          logger.error(f"Error stopping processing recycle: {e}")
+          
     else:
       logger.warning(f"Unknown message type received: {message_type}")
       await self.send_message(websocket, {
@@ -150,11 +171,37 @@ class WebSocketServer:
         'message': f'Unknown message type: {message_type}'
       })
   
-  async def start_server(self):
+  async def start_server(self, threaded: bool = False):
+    """Start the WebSocket server.
+    
+    :param threaded: If True, run in a separate thread
+    """
+    if threaded:
+      # Run server in a separate thread
+      def thread_target():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+          loop.run_until_complete(self._run_server_in_thread())
+        except Exception as e:
+          logger.error(f"WebSocket server thread error: {e}")
+        finally:
+          loop.run_until_complete(loop.shutdown_asyncgens())
+          loop.close()
+
+      self.server_thread = threading.Thread(target=thread_target, daemon=True)
+      self.server_thread.start()
+      logger.info("WebSocket server started in a separate thread")
+      return self.server_thread
+    else:
+      # Blocking mode (default behavior)
+      await self._run_server_in_thread()
+
+  async def _run_server_in_thread(self):
+    """Internal method to run the server (used by both threaded and non-threaded modes)."""
     self.server = await serve(self.handle_client, self.host, self.port)
     self.running = True
     logger.info(f"WebSocket server started on ws://{self.host}:{self.port}")
-
     await self.server.serve_forever()
   
   async def stop_server(self):
