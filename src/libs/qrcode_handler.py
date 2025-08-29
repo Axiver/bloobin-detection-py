@@ -58,13 +58,19 @@ class QRCodeDetector:
         # Check for cancellation
         await asyncio.sleep(0)  # Yield control to allow cancellation
         
+        # Capture a ByteIO image
         frame = self.picam_stream.capture_array()  # numpy array
         qr_codes = self.process_frame(frame)
+        # print(f"QR codes: {qr_codes}")
+
+        # # Save the image
+        # cv2.imwrite("qr_code_image.jpg", frame)
+
         if len(qr_codes) > 0:
           await callback(qr_codes)
         
         # Small delay to prevent excessive CPU usage
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.8)
         
     except asyncio.CancelledError:
       print("QR scanning task cancelled")

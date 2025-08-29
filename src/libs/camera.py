@@ -150,6 +150,8 @@ class PiCameraStream(MediaStreamTrack):
             encode="lores",
         )
         self.picam2.configure(video_config)
+
+        self.picam2.set_controls({"AfMode": controls.AfModeEnum.Continuous, "AfRange": controls.AfRangeEnum.Macro, "AfSpeed": controls.AfSpeedEnum.Fast})
         
         # Create encoder with specified bitrate
         self.encoder = H264Encoder(bitrate)
@@ -218,7 +220,7 @@ class PiCameraStream(MediaStreamTrack):
         
         try:
             with self._lock:  # Ensure thread safety for camera operations
-                return self.picam2.capture_array()
+                return self.picam2.capture_array("main")
         except Exception as e:
             print(f"Error capturing frame: {e}")
             return None
