@@ -76,7 +76,8 @@ async def processObject():
       "data": {
         "canBeRecycled": canBeRecycled,
         "identifiedMaterial": identifiedMaterial,
-        "reasonForRejection": reasonForRejection
+        "reasonForRejection": reasonForRejection,
+        "receptacleMaterial": BIN_MODE,
       }
     })
 
